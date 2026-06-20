@@ -1,0 +1,637 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{tikz}
+\usepackage[hidelinks]{hyperref}
+
+\usetikzlibrary{patterns,arrows.meta}
+
+\graphicspath{{figures/}{../output/column/}}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\renewcommand{\arraystretch}{1.18}
+
+\newcommand{\unit}[1]{\,\mathrm{#1}}
+
+\begin{document}
+\pagestyle{plain}
+
+% --- title page -------------------------------------------------------------
+\thispagestyle{empty}
+\vspace*{0.32\textheight}
+\begin{center}
+{\LARGE\bfseries RC Cantilever Column:\\[4pt] Lattice vs.\ Force-Based Beam--Column}\par
+\vspace{12pt}
+{\large Model, calibration, and static / dynamic analysis}
+\end{center}
+\clearpage
+
+% --- contents on its own page -----------------------------------------------
+\tableofcontents
+\clearpage
+
+% --- main body starts on a fresh page ---------------------------------------
+
+% ============================================================================
+\section{Overview}
+% ============================================================================
+
+The study compares two backend idealizations of the \emph{same} physical column
+(Section~\ref{sec:specimen}):
+
+\begin{itemize}
+\item \textbf{Reference model} --- a force-based fiber \texttt{forceBeamColumn} cantilever
+      (Section~\ref{sec:fiber}).
+\item \textbf{Lattice model} --- a 2D assembly of axial truss struts generated on a structured
+      \texttt{gmsh} node grid, with longitudinal and transverse reinforcement represented as
+      steel struts on shared nodes (Section~\ref{sec:lattice}).
+\end{itemize}
+
+Four analysis cases are reported, each run for both models:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Case & Loading & Constitutive setting \\
+\midrule
+Pushover (linear)     & monotonic lateral displacement & Elastic \\
+Pushover (nonlinear)  & monotonic lateral displacement & Concrete02 + Steel02 \\
+Dynamic (linear)      & base acceleration (sine, El Centro) & Elastic \\
+Dynamic (nonlinear)   & base acceleration (sine, El Centro) & Concrete02 + Steel02 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The lattice strut area is calibrated so that the lattice and the fiber column share the same
+initial lateral stiffness $K_0$ (Section~\ref{sec:calib}); this same calibration fixes the
+fundamental period used by the dynamic cases. All quantities use a consistent kip, inch, second
+unit system.
+
+% ============================================================================
+\section{Physical specimen}
+\label{sec:specimen}
+% ============================================================================
+
+The specimen is a vertical RC cantilever, fixed at the base and free at the top, carrying a
+constant axial compression at the top and loaded laterally in the plane of its larger section
+dimension. The specimen is identical for every analysis case.
+
+\subsection{Geometry and loading}
+
+\begin{table}[H]
+\centering
+\caption{Specimen geometry and applied loads.}
+\begin{tabular}{l l l}
+\toprule
+Quantity & Symbol & Value \\
+\midrule
+Cantilever height            & $H$        & $144\unit{in}$ \\
+Section depth (in-plane, $x$)& $W$        & $24\unit{in}$ \\
+Section width (out-of-plane) & $t$        & $15\unit{in}$ \\
+Clear cover                  & --         & $1.5\unit{in}$ \\
+Axial load (constant, top)   & $P$        & $180\unit{kip}$ (compression) \\
+Reference lateral load       & $H_\mathrm{ref}$ & $10\unit{kip}$ (shape only) \\
+Base support                 & --         & fully fixed ($u_x,u_y$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.40\textwidth}
+\centering
+\begin{tikzpicture}[scale=1]
+  % elevation, schematic (not to scale); true dimensions labelled
+  \def\w{1.4}\def\h{8.0}
+  \fill[gray!12] (-\w/2,0) rectangle (\w/2,\h);
+  \draw[thick] (-\w/2,0) rectangle (\w/2,\h);
+  % fixed base hatch
+  \draw[thick] (-\w/2-0.3,0) -- (\w/2+0.3,0);
+  \foreach \x in {-0.9,-0.6,...,0.9} { \draw (\x,0) -- (\x-0.25,-0.3); }
+  % longitudinal bar lines (3)
+  \foreach \x in {-0.45,0,0.45} { \draw[blue!70,thick] (\x,0) -- (\x,\h); }
+  % axial load
+  \draw[-{Latex[length=2.2mm]},very thick] (0,\h+0.9) -- (0,\h+0.05);
+  \node[right] at (0.15,\h+0.6) {\small $P=180$};
+  % lateral push
+  \draw[-{Latex[length=2.2mm]},very thick,red] (\w/2+0.05,\h) -- (\w/2+1.1,\h);
+  \node[red,above] at (\w/2+0.7,\h+0.05) {\small $\Delta$};
+  \filldraw (0,\h) circle (1.6pt) node[above left]{\scriptsize ctrl};
+  % height dim
+  \draw[<->] (-\w/2-0.7,0) -- (-\w/2-0.7,\h);
+  \node[rotate=90,above] at (-\w/2-0.7,\h/2) {\small $H=144$ in};
+  \node[below] at (0,-0.45) {\small $W=24$ in};
+\end{tikzpicture}
+\caption{Elevation (schematic).}
+\end{subfigure}\hfill
+\begin{subfigure}{0.56\textwidth}
+\centering
+\begin{tikzpicture}[scale=0.22]
+  % cross-section to scale: x = depth 24 in (-12..12), z = width 15 in (-7.5..7.5)
+  \draw[thick] (-12,-7.5) rectangle (12,7.5);            % outer (cover face)
+  \draw[dashed] (-10.5,-6) rectangle (10.5,6);           % core boundary (cover 1.5)
+  % longitudinal bars: 3 @ x=-10.5, 2 @ x=0, 3 @ x=+10.5 (spread over z)
+  \foreach \z in {-6,0,6} { \filldraw[blue!70] (-10.5,\z) circle (0.55); }
+  \foreach \z in {-6,6}    { \filldraw[blue!70] (0,\z)    circle (0.55); }
+  \foreach \z in {-6,0,6} { \filldraw[blue!70] (10.5,\z)  circle (0.55); }
+  % dimensions
+  \draw[<->] (-12,-9) -- (12,-9); \node[below] at (0,-9) {\small $W=24$ in ($x$)};
+  \draw[<->] (14,-7.5) -- (14,7.5); \node[right] at (14,0) {\small $t=15$ in ($z$)};
+  \node at (0,3) {\small core};
+  \node[align=center] at (0,-3.3) {\scriptsize cover $1.5$ in};
+\end{tikzpicture}
+\caption{Cross-section: $A_s = 1.8 / 1.2 / 1.8\unit{in^2}$ at $x=-10.5/0/+10.5$ in.}
+\end{subfigure}
+\caption{Physical specimen. Lateral load and displacement $\Delta$ act along $x$ (bending about
+the $z$ axis). Drawings are schematic; dimensions are labelled with their true values.}
+\end{figure}
+
+\subsection{Materials}
+
+Concrete is defined by two physical grades --- a \emph{confined core} and an \emph{unconfined
+cover} --- and the reinforcement by a single steel grade. Values are stored as positive
+magnitudes; the OpenSees sign convention (compression negative) is applied in the material
+mapping.
+
+\begin{table}[H]
+\centering
+\caption{Concrete grades (physical input). $\rho$ is mass density.}
+\begin{tabular}{l c c c c c c c c}
+\toprule
+Grade & $E$ (ksi) & $\nu$ & $\rho$ (kip\,s$^2$/in$^4$) & $f'_c$ (ksi) & $\varepsilon_{c0}$ & $f_{cu}$ (ksi) & $\varepsilon_{U}$ & $f_t$ (ksi) \\
+\midrule
+Confined core    & 4030 & 0.20 & $2.25\times10^{-7}$ & 6.0 & 0.004 & 4.0 & 0.030 & 0.6 \\
+Unconfined cover & 4030 & 0.20 & $2.25\times10^{-7}$ & 5.0 & 0.002 & 0.0 & 0.006 & 0.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Reinforcing-steel grade (Steel02 / Giuffr\'e--Menegotto--Pinto).}
+\begin{tabular}{l c c c c c c}
+\toprule
+Grade & $f_y$ (ksi) & $E_0$ (ksi) & $b$ & $R_0$ & $c_{R1}$ & $c_{R2}$ \\
+\midrule
+Reinforcement & 60.0 & 30000 & 0.01 & 18.0 & 0.925 & 0.15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Reinforcement layout}
+
+\begin{table}[H]
+\centering
+\caption{Reinforcement. Longitudinal bars lump the benchmark $3{+}2{+}3$ bars at
+$0.6\unit{in^2}$ each into one area per layer; transverse ties are placed one per mesh row.}
+\begin{tabular}{l l l l}
+\toprule
+Type & Position & Area (in$^2$) & Extent \\
+\midrule
+Longitudinal layer 1 & $x=-10.5$ in & 1.8 & full height $0\le y\le 144$ \\
+Longitudinal layer 2 & $x=0$ in     & 1.2 & full height $0\le y\le 144$ \\
+Longitudinal layer 3 & $x=+10.5$ in & 1.8 & full height $0\le y\le 144$ \\
+Transverse ties      & each mesh row $y_i$ & 0.3 per tie & $x=-10.5 \to +10.5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Total longitudinal steel area is $4.8\unit{in^2}$, identical in both models.
+
+% ============================================================================
+\section{Numerical models}
+% ============================================================================
+
+\subsection{Force-based fiber beam--column (reference)}
+\label{sec:fiber}
+
+The reference is a single force-based \texttt{forceBeamColumn} element with a fiber section,
+in a 2D model with three DOFs per node ($u_x,u_y,\theta_z$).
+
+\begin{table}[H]
+\centering
+\caption{Fiber beam--column model definition.}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}p{10.8cm}}
+\toprule
+Item & Specification \\
+\midrule
+Model dimension          & \texttt{ndm}=2, \texttt{ndf}=3 \\
+Nodes                    & base (fixed), top (free, control) \\
+Element                  & \texttt{forceBeamColumn} \\
+Geometric transform      & \texttt{PDelta} \\
+Beam integration         & \texttt{Lobatto}, 5 integration points \\
+Fiber section            & $24$ ($y$) $\times\,15$ ($z$), cover $1.5$ in \\
+\quad core patch         & $10\times1$ fibers (material: core) \\
+\quad cover patches      & 1-fiber strips (material: cover) \\
+\quad steel layers       & $3 / 2 / 3$ bars at $y=-10.5 / 0 / +10.5$, $A_s=0.6\unit{in^2}$ \\
+Axial load               & $P=180\unit{kip}$ at the top node (held constant) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The fiber materials are \emph{matched} to the lattice grades: nonlinear cases use
+\texttt{Concrete02} (core/cover) and \texttt{Steel02}; linear cases use \texttt{Elastic}
+($E=4030\unit{ksi}$ concrete, $E_0=30000\unit{ksi}$ steel). For the nonlinear dynamic case the
+column is subdivided into 96 equal force-based elements (nodes at the lattice row heights) so the
+self-mass distributes by tributary length identically to the lattice. The fiber-section
+\texttt{Concrete02} laws use the grade values directly (no length regularization; there is no
+fiber analog):
+
+\begin{table}[H]
+\centering
+\caption{Fiber-section \texttt{Concrete02} arguments
+$(f_{pc},\varepsilon_{c0},f_{pcu},\varepsilon_{U},\lambda,f_t,E_{ts})$, compression negative.}
+\begin{tabular}{l l}
+\toprule
+Fiber material & Arguments \\
+\midrule
+Core  (nonlinear) & $(-6.0,\,-0.004,\,-4.0,\,-0.030,\,0.1,\,0.6,\,403.0)$ \\
+Cover (nonlinear) & $(-5.0,\,-0.002,\,-0.0,\,-0.006,\,0.1,\,0.5,\,403.0)$ \\
+Steel (Steel02)   & $(60.0,\,30000,\,0.01,\,18.0,\,0.925,\,0.15)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{RC lattice model}
+\label{sec:lattice}
+
+The lattice is a 2D assembly of axial struts (two translational DOFs per node) built on a
+structured \texttt{gmsh} grid; struts connect node pairs within a peridynamic-style horizon, and
+reinforcement is added as steel struts on the shared lattice nodes (perfectly bonded).
+
+\begin{table}[H]
+\centering
+\caption{RC lattice model definition.}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}p{10.8cm}}
+\toprule
+Item & Specification \\
+\midrule
+Model dimension      & \texttt{ndm}=2, \texttt{ndf}=2 \\
+Mesh generator       & \texttt{gmsh} structured transfinite grid \\
+Mesh size            & $1.5\unit{in}$ ($16\times96$ cells) \\
+Nodes                & 1649 ($17\times97$ grid) \\
+Strut element        & \texttt{corotTruss} (corotational, geometric nonlinearity) \\
+Strut connectivity   & horizon rule, $r = \text{horizon}\times\text{mesh} = 1.5\times1.5 = 2.25\unit{in}$ \\
+\quad orthogonal struts & length $1.5$ in (vertical + horizontal) \\
+\quad diagonal struts   & length $1.5\sqrt{2}=2.1213$ in \\
+Concrete material    & per-zone length-regularized \texttt{Concrete02} (4 distinct) \\
+Rebar material       & \texttt{Steel02} (1 grade) \\
+Base support         & 17 base-row nodes fixed ($u_x,u_y$) \\
+Control node         & top-center node \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Lattice element inventory (7902 struts total).}
+\begin{tabular}{l r l r}
+\toprule
+Concrete struts & count & Reinforcement struts & count \\
+\midrule
+vertical (orthogonal)   & 1632 & longitudinal (3 layers)       & 288 \\
+horizontal (orthogonal) & 1552 & transverse ties (97 rows)     & 1358 \\
+diagonal                & 3072 & & \\
+\midrule
+\textbf{concrete total} & \textbf{6256} & \textbf{rebar total} & \textbf{1646} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Length-regularized concrete (crack-band).}
+Both softening branches of the strut concrete law are regularized by the strut length $L$, so
+that the dissipated energy is mesh-objective:
+\[
+E_{ts}=\frac{f_t^2 L}{2G_f}\ \ (\le 0.5E),
+\qquad
+\varepsilon_{U}=\varepsilon_{c0}+\frac{2G_{fc}}{(f_c+f_{cu})\,L}\ \ (\ge \varepsilon_U^{\text{grade}}),
+\]
+with a residual compression plateau $f_{cu}\ge 0.2 f_c$. The fracture energies are
+$G_f = 4.0\times10^{-3}\unit{kip/in}$ (tension) and $G_{fc}=1.5\unit{kip/in}$ (compression).
+This yields four concrete materials (two zones $\times$ two strut lengths):
+
+\begin{table}[H]
+\centering
+\caption{Lattice \texttt{Concrete02} arguments
+$(f_{pc},\varepsilon_{c0},f_{pcu},\varepsilon_{U},\lambda,f_t,E_{ts})$, compression negative.}
+\begin{tabular}{l l l}
+\toprule
+Zone / strut length & Arguments \\
+\midrule
+Cover, $L=1.5$    & $(-5.0,\,-0.002,\,-1.0,\,-0.33533,\,0.1,\,0.5,\,46.875)$ \\
+Cover, $L=2.1213$ & $(-5.0,\,-0.002,\,-1.0,\,-0.23770,\,0.1,\,0.5,\,66.291)$ \\
+Core,  $L=1.5$    & $(-6.0,\,-0.004,\,-4.0,\,-0.20400,\,0.1,\,0.6,\,67.500)$ \\
+Core,  $L=2.1213$ & $(-6.0,\,-0.004,\,-4.0,\,-0.14542,\,0.1,\,0.6,\,95.459)$ \\
+Rebar (Steel02)   & $(60.0,\,30000,\,0.01,\,18.0,\,0.925,\,0.15)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.86\textwidth]{column_lattice_mesh.png}
+\caption{RC lattice discretization: concrete horizon struts (grey), longitudinal rebar struts
+(blue), transverse stirrup ties (green), and fixed base nodes (red). Left: full elevation; right:
+base region detail showing the orthogonal and diagonal strut pattern.}
+\end{figure}
+
+\paragraph{Mass.}
+Nodal mass is lumped by tributary volume ($\rho\,t\,A_\mathrm{trib}/4$ per quad corner) from the
+same grid used to draw the struts. The total lattice self-mass is
+$\sum m = 1.1664\times10^{-2}\unit{kip\,s^2/in}$ ($=\rho V$, $V=24\times144\times15$). For the
+dynamic cases a top lumped mass $P/g = 0.4658\unit{kip\,s^2/in}$ (the axial load as tributary
+seismic mass, $g=386.4\unit{in/s^2}$) is added at the top nodes.
+
+% ============================================================================
+\section{Stiffness calibration}
+\label{sec:calib}
+% ============================================================================
+
+The single calibration parameter is the concrete strut cross-sectional area $A$ (uniform over all
+concrete struts), chosen so the lattice's initial lateral stiffness $K_0$ equals the fiber
+column's. The reinforcement areas are fixed by the specimen and are not calibrated.
+
+\begin{itemize}
+\item \textbf{Nonlinear cases:} a plain elastic lattice (reinforcement omitted) has
+      $K_0 \propto A$, so a single solve gives $A$ from the fiber-column $K_0$.
+\item \textbf{Linear cases:} the full RC elastic lattice (concrete $+$ rebar) has a stiffness that
+      is monotone but not proportional in $A$ (rebar adds a parallel stiffness), so $A$ is found by
+      a secant root-find on $K_0(A)-K_0^{\mathrm{ref}}$.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Calibration results. $K_0^{\mathrm{ref}}$ is the fiber-column initial lateral stiffness
+(first finite pushover step). The nonlinear $K_0^{\mathrm{ref}}$ is the \texttt{Concrete02}
+initial tangent; the linear value is the elastic stiffness.}
+\begin{tabular}{l c c c c}
+\toprule
+Configuration & $K_0^{\mathrm{ref}}$ (kip/in) & Calibrated $A$ (in$^2$) & Lattice $K_0$ (kip/in) & Error \\
+\midrule
+Linear     & 68.69 & 11.736 & 68.69 & $-0.00\%$ \\
+Nonlinear  & 61.53 & 12.453 & matched by construction & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Analysis procedures and parameters}
+% ============================================================================
+
+\subsection{Pushover}
+
+A constant-gravity stage (axial $P$) is applied first and held; the lateral displacement of the
+control node is then increased monotonically under displacement control while the base shear
+(sum of horizontal base reactions) is recorded.
+
+\begin{table}[H]
+\centering
+\caption{Pushover analysis parameters (both models).}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}p{10.8cm}}
+\toprule
+Item & Setting \\
+\midrule
+Constraint handler   & \texttt{Transformation} \\
+DOF numberer         & \texttt{RCM} \\
+System of equations  & \texttt{BandGeneral} \\
+Gravity stage        & \texttt{LoadControl}, 10 steps; \texttt{Newton}; \texttt{NormDispIncr} $10^{-8}$ \\
+Hold gravity         & \texttt{loadConst} (time reset to 0) \\
+Lateral stage        & \texttt{DisplacementControl} on control DOF, $dU=0.05\unit{in}$ \\
+Target tip displacement & $10.0\unit{in}$ \\
+Convergence test     & \texttt{NormDispIncr}, tol $10^{-5}$ (lattice), $10^{-6}$ (fiber) \\
+Primary algorithm    & \texttt{Newton} \\
+Recovery on failure  & sub-steps $5/20/50$ with
+                       \texttt{Newton}$\to$\texttt{KrylovNewton}$\to$\texttt{NewtonLineSearch} \\
+Base shear           & $-\sum$ horizontal base reactions \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Dynamic (seismic time history)}
+
+After the held-gravity stage, the base is driven by a \texttt{UniformExcitation} (ground
+acceleration record) along $x$. Two records are used: a harmonic acceleration tuned to resonance
+with the structure's fundamental period $T_1$, and the recorded El Centro 1940 NS ground motion.
+The record intensity is tuned on the (inexpensive) fiber column to a target peak roof drift; the
+\emph{same} scaled record then drives the lattice.
+
+In the \emph{linear} cases all materials are \texttt{Elastic}, so both models stay linear at any
+amplitude. In the \emph{nonlinear} cases the intensity is set so the peak roof drift (about
+$1.2\unit{in}$) exceeds the effective yield drift of both models --- the elastic limit is
+$\approx 0.5\unit{in}$ for the fiber column and $\approx 0.6\unit{in}$ for the lattice (peak shear
+$\div\,K_0$; see the pushover curves in Section~\ref{sec:res-pushover}) --- so both the lattice and
+the fiber beam--column respond in the nonlinear range, leaving a permanent residual drift
+(Table~\ref{tab:residual}).
+
+\begin{table}[H]
+\centering
+\caption{Dynamic analysis parameters (both models).}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}p{10.8cm}}
+\toprule
+Item & Setting \\
+\midrule
+Constraint handler / numberer / system & \texttt{Transformation} / \texttt{RCM} / \texttt{BandGeneral} \\
+Mass                 & lumped self-mass $+$ top mass $P/g$ \\
+Damping              & Rayleigh, $5\%$ at modes 1 and 2 (mass $+$ committed-stiffness) \\
+Time integrator      & \texttt{HHT}, $\alpha=0.7$ (numerical damping) \\
+Integration step     & $\Delta t = 0.01\unit{s}$ \\
+Convergence test     & \texttt{NormDispIncr}, tol $10^{-6}$, 50 iterations \\
+Primary algorithm    & \texttt{Newton} \\
+Recovery on failure  & sub-steps $10/50/200$ with \texttt{Newton}$\to$\texttt{KrylovNewton}
+                       $\to$\texttt{NewtonLineSearch}$\to$\texttt{ModifiedNewton} \\
+Excitation pattern   & \texttt{UniformExcitation} along $x$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Base excitation records.}
+\begin{tabular}{l l l l l}
+\toprule
+Record & Points & $\Delta t_\mathrm{rec}$ (s) & Peak (g) & Duration (s) \\
+\midrule
+Sine resonance (20 cycles, 100 samples/cycle) & 2001 & $T_1/100$ & 1.000 & $20\,T_1$ \\
+El Centro 1940 NS & 1559 & 0.0200 & 0.319 & 31.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Results}
+% ============================================================================
+
+\subsection{Pushover}
+\label{sec:res-pushover}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{column_pushover_linear.png}
+\caption{Linear (elastic).}
+\end{subfigure}\hfill
+\begin{subfigure}{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{column_pushover.png}
+\caption{Nonlinear (Concrete02 + Steel02).}
+\end{subfigure}
+\caption{Base shear versus tip displacement: RC lattice (blue, dashed) versus fiber
+beam--column (red). The linear curves overlap (matched $K_0$); the nonlinear lattice terminates
+at $6.17\unit{in}$ where the static solver stops converging.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Pushover results.}
+\small
+\begin{tabular}{l l c c c}
+\toprule
+Configuration & Model & Peak shear (kip) & Max tip disp.\ (in) & Converged \\
+\midrule
+\multirow{2}{*}{Linear}
+ & Fiber beam--column & 686.9 (@10 in) & 10.00 & yes \\
+ & RC lattice         & 686.9 (@10 in) & 10.00 & yes \\
+\midrule
+\multirow{2}{*}{Nonlinear}
+ & Fiber beam--column & 31.37 & 10.00 & yes \\
+ & RC lattice         & 36.75 & 6.17  & no (terminated) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For each record the response is reported as (i) the roof-drift and base-shear \emph{histories}
+(both models overlaid) and (ii) the \emph{hysteresis} loops, shown for the RC lattice and the
+fiber beam--column separately and then overlaid (each loop panel is autoscaled, so the two are
+legible independently of their force magnitudes).
+
+\subsection{Dynamic --- linear (elastic)}
+
+\noindent\textbf{Sine resonance} (scale $0.039\times$).
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_linear_sine.png}
+\caption{Linear, sine --- response histories (roof drift, base shear): RC lattice vs.\ elastic
+fiber beam--column.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_linear_sine_hyst.png}
+\caption{Linear, sine --- hysteresis: RC lattice (left), fiber beam--column (middle), and the two
+overlaid (right).}
+\end{figure}
+
+\noindent\textbf{El Centro 1940 NS} (scale $0.412\times$).
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_linear_elcentro.png}
+\caption{Linear, El Centro --- response histories (roof drift, base shear).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_linear_elcentro_hyst.png}
+\caption{Linear, El Centro --- hysteresis: RC lattice (left), fiber beam--column (middle), and the
+two overlaid (right).}
+\end{figure}
+
+\subsection{Dynamic --- nonlinear (Concrete02 + Steel02)}
+
+\noindent\textbf{Sine resonance} (scale $0.145\times$).
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_sine.png}
+\caption{Nonlinear, sine --- response histories (roof drift, base shear): RC lattice vs.\ fiber
+beam--column.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_sine_hyst.png}
+\caption{Nonlinear, sine --- hysteresis: RC lattice (left, peak $\approx 37$ kip), fiber
+beam--column (middle), and the two overlaid (right). Note the separate vertical scales.}
+\end{figure}
+
+\noindent\textbf{El Centro 1940 NS} (scale $0.504\times$).
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_elcentro.png}
+\caption{Nonlinear, El Centro --- response histories (roof drift, base shear).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{column_dynamic_elcentro_hyst.png}
+\caption{Nonlinear, El Centro --- hysteresis: RC lattice (left), fiber beam--column (middle), and
+the two overlaid (right). Note the separate vertical scales.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Dynamic results. Drift is the relative roof displacement; peak $|V|$ is the maximum
+absolute recorded base shear (includes transient reaction peaks).}
+\begin{tabular}{l l c c c c c c}
+\toprule
+ & & \multicolumn{2}{c}{$T_1$ (s)} & \multicolumn{2}{c}{Peak drift (in)} & \multicolumn{2}{c}{Peak $|V|$ (kip)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+Config.\ / record & Scale & Fiber & Lattice & Fiber & Lattice & Fiber & Lattice \\
+\midrule
+Linear, sine        & $0.039\times$ & 0.520 & 0.515 & 1.000 & 1.071 & 68.7 & 73.4 \\
+Linear, El Centro   & $0.412\times$ & 0.520 & 0.515 & 1.000 & 1.021 & 68.5 & 69.7 \\
+Nonlinear, sine     & $0.145\times$ & 0.558 & 0.506 & 1.251 & 1.202 & 293.0 & 36.7 \\
+Nonlinear, El Centro& $0.504\times$ & 0.558 & 0.506 & 1.182 & 1.238 & 636.1 & 37.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Residual (end-of-record) roof drift.}
+\label{tab:residual}
+\begin{tabular}{l l c c}
+\toprule
+Configuration & Record & Fiber (in) & Lattice (in) \\
+\midrule
+Linear     & Sine       & $+0.976$ & $+1.036$ \\
+Linear     & El Centro  & $-0.021$ & $-0.027$ \\
+Nonlinear  & Sine       & $+0.224$ & $+0.353$ \\
+Nonlinear  & El Centro  & $+0.022$ & $+0.013$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\appendix
+\section{Software and reproduction}
+% ============================================================================
+
+\begin{table}[H]
+\centering
+\caption{Software environment (native arm64, macOS).}
+\begin{tabular}{l l}
+\toprule
+Component & Version \\
+\midrule
+Python        & 3.12.13 (arm64) \\
+openseespy    & 3.8.0.0 (openseespymac 3.8.0.0) \\
+gmsh          & 4.15.2 \\
+numpy / scipy & 2.4.6 / 1.17.1 \\
+matplotlib    & 3.11.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Run from the \texttt{src/} directory with the project virtual environment active:
+
+\begin{verbatim}
+python examples/column/pushover.py            # nonlinear pushover
+python examples/column/pushover_linear.py     # linear pushover
+python examples/column/dynamic.py        --excitation sine
+python examples/column/dynamic.py        --excitation elcentro
+python examples/column/dynamic_linear.py --excitation sine
+python examples/column/dynamic_linear.py --excitation elcentro
+python examples/doc/make_model_figures.py     # lattice figure
+\end{verbatim}
+
+\end{document}

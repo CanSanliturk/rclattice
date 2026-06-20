@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Generated outputs (re-run examples to regenerate)
+src/examples/output/
+
+# Gmsh mesh files
+*.msh
+*.geo_unrolled
+
+# OpenSees recorder output
+*.out
+recorder_*.txt
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*.DS_Store
+
+# Claude Code settings (local IDE config)
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# LaTeX auxiliary files (keep .tex and .pdf, ignore build artifacts)
+*.aux
+*.log
+*.bbl
+*.blg
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.out
