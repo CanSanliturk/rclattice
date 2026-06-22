@@ -13,19 +13,21 @@ adds a fixed parallel stiffness, so K0 is not proportional to area) via a secant
 
 from __future__ import annotations
 
-from rclattice.builders import build_lattice, build_lattice_rc, select_nodes
+from rclattice.builders import build_continuum_rc, build_lattice, build_lattice_rc, select_nodes
+from rclattice.calibration import calibrate_lattice, continuum_targets
 from rclattice.materials import (
+    concrete_nd_nonlinear,
     concrete_uniaxial_elastic,
     concrete_uniaxial_nonlinear,
     concrete_uniaxial_regularized,
     steel_uniaxial,
     steel_uniaxial_elastic,
 )
-from rclattice.opensees import run_beamcolumn_cantilever, run_pushover
+from rclattice.opensees import run_beamcolumn_cantilever, run_dynamic, run_pushover
 
 from specimen import (
-    CORE, COVER_C, DU, EPS, H, HORIZON, MESH, P, STEEL, TARGET, W,
-    column_problem, lateral_loads, rebars, zone_of,
+    CORE, COVER_C, DU, EPS, GF, GFC, H, HORIZON, MESH, P, STEEL, TARGET, W,
+    column_problem, lateral_loads, longitudinal_rebars, rebars, zone_of,
 )
 
 
@@ -59,10 +61,74 @@ def beamcolumn_reference() -> dict:
     return run_beamcolumn_cantilever(height=H, P=P, dU=DU, target=TARGET, materials=materials)
 
 
-def calibrate_area(k_bc: float):
-    """Strut area giving the elastic lattice the same initial lateral stiffness as `k_bc`.
-    Returns (area, control_node, base_nodes)."""
-    lat0, _ = build_lattice(column_problem(CORE), MESH, strut_area=1.0, horizon=HORIZON)
+def _continuum_model(Gf: float = GF, Gfc: float = GFC):
+    """Build the RC continuum column (D29): structured quads with nonlinear nD concrete (ASDConcrete3D
+    + PlaneStress, the SAME core/cover grades, crack-band regularized to the quad size, PURE-DAMAGE
+    hysteresis to match Concrete02 — D30) + the three longitudinal bars as steel struts on shared
+    nodes (no stirrups; the 2D continuum supplies the lateral/shear path the lattice gets from them).
+    Returns (model, control_node, base_nodes). Shared by the static reference, the K0 probe, and the
+    dynamic reference."""
+    def nd_material_for(zone: str):
+        grade = CORE if zone == "core" else COVER_C
+        return concrete_nd_nonlinear(grade, 0, 0, lch=MESH, Gf=Gf, Gfc=Gfc)
+
+    model, _ = build_continuum_rc(column_problem(CORE), MESH, nd_material_for=nd_material_for,
+                                  zone_of=zone_of, rebars=longitudinal_rebars())
+    ctrl = select_nodes(model, (-EPS, EPS, H - EPS, H + EPS))[0]
+    base = select_nodes(model, (-W, W, -EPS, EPS))
+    return model, ctrl, base
+
+
+def continuum_reference(*, dU: float = 0.1, target: float = TARGET, Gf: float = GF, Gfc: float = GFC) -> dict:
+    """2D plane-stress continuum pushover, material-matched to the lattice (D29) — the alternative
+    reference. Captures the 2D load-spreading / diagonal action a 1D fiber section cannot, so it is
+    the apples-to-apples reference. Heavier than the beam-column (1536 ASDConcrete3D quads) → coarser
+    `dU`. Returns the pushover curve {"disp", "shear", "converged"} (shear = base reaction sum)."""
+    model, ctrl, base = _continuum_model(Gf, Gfc)
+    return run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
+                        control_dof=1, dU=dU, target=target, base_nodes=base)
+
+
+def continuum_k0(*, Gf: float = GF, Gfc: float = GFC) -> float:
+    """Initial lateral stiffness of the RC continuum column (one tiny pushover step) — the calibration
+    target for the dynamic --reference continuum, mirroring how the beam-column K0 is taken (D30)."""
+    model, ctrl, base = _continuum_model(Gf, Gfc)
+    r = run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
+                     control_dof=1, dU=1e-3, target=1e-3, base_nodes=base)
+    return r["shear"][1] / r["disp"][1]
+
+
+def continuum_dynamic(*, accel, dt_record: float, scale: float, top_mass: float, dt: float = 0.01,
+                      Gf: float = GF, Gfc: float = GFC) -> dict:
+    """Seismic time-history of the RC continuum column (D30) — the dynamic counterpart of
+    `continuum_reference`, the reference for the lattice's nonlinear dynamic run. Bakes the axial-load
+    tributary seismic mass `top_mass` onto the top nodes (on top of the builder's lumped self-mass,
+    exactly as the lattice does), then runs the SAME scaled UniformExcitation via `run_dynamic`.
+    Returns the `_transient_uniform_excitation` dict (t/disp/shear histories + peaks) plus periods."""
+    model, ctrl, base = _continuum_model(Gf, Gfc)
+    top = select_nodes(model, (-W, W, H - EPS, H + EPS))
+    for nid in top:
+        mx, my = model.masses[nid]
+        model.masses[nid] = (mx + top_mass / len(top), my + top_mass / len(top))
+    return run_dynamic(model, accel=accel, dt_record=dt_record, scale=scale, control_node=ctrl,
+                       control_dof=1, base_nodes=base, dt=dt)
+
+
+def make_reference(name: str) -> dict:
+    """Dispatch the verification reference by name (mirrors `make_excitation`): "beamcolumn" (fast
+    fiber `forceBeamColumn`) or "continuum" (2D plane-stress quads, D29). Returns its pushover curve."""
+    if name == "beamcolumn":
+        return beamcolumn_reference()
+    if name == "continuum":
+        return continuum_reference()
+    raise ValueError(f"unknown reference {name!r} (expected 'beamcolumn' or 'continuum')")
+
+
+def calibrate_area(k_bc: float, *, horizon: float = HORIZON):
+    """SCALAR calibration: one uniform strut area giving the elastic lattice the same initial lateral
+    stiffness as `k_bc`. Matches a single number (K0). Returns (area, control_node, base_nodes).
+    `horizon` sets the strut connectivity (larger = more redundant bracing, D31)."""
+    lat0, _ = build_lattice(column_problem(CORE), MESH, strut_area=1.0, horizon=horizon)
     ctrl = select_nodes(lat0, (-EPS, EPS, H - EPS, H + EPS))[0]
     base = select_nodes(lat0, (-W, W, -EPS, EPS))
     r = run_pushover(lat0, lateral_loads=lateral_loads(lat0), control_node=ctrl,
@@ -70,12 +136,32 @@ def calibrate_area(k_bc: float):
     return k_bc / (r["shear"][-1] / r["disp"][-1]), ctrl, base
 
 
-def rc_lattice(regularize: bool, Gf: float, Gfc: float, area: float):
-    """The calibrated RC lattice column model (corotTruss struts + rebar)."""
+def calibrate_groups(*, n_modes: int = 3, horizon: float = HORIZON):
+    """STRONG 2-group calibration (D16, `calibration.py`): fit orthogonal (length ~ s) and diagonal
+    (length ~ s*sqrt2) strut areas, by bounded least squares, to the CONTINUUM's static deflection +
+    first `n_modes` modal periods. Two area groups tune the effective stiffness AND the Poisson/shear
+    coupling (the diagonal/orthogonal ratio) — not just the single K0 scalar — so the lattice's elastic
+    stress field tracks the continuum better (trims the diagonal-strut overstrength). The plain
+    concrete skeletons are matched (no rebar, like `calibrate_area`); the rebar is then added equally
+    to both. Returns (area_fn, control_node, base_nodes, CalibrationResult). area_fn maps strut length
+    -> area, accepted directly by `build_lattice_rc(strut_area=...)`."""
+    problem = column_problem(CORE)
+    targets = continuum_targets(problem, MESH, n_modes=n_modes)
+    result = calibrate_lattice(problem, MESH, targets=targets, horizon=horizon, n_modes=n_modes)
+    lat0, _ = build_lattice(problem, MESH, strut_area=result.area_fn, horizon=horizon)
+    ctrl = select_nodes(lat0, (-EPS, EPS, H - EPS, H + EPS))[0]
+    base = select_nodes(lat0, (-W, W, -EPS, EPS))
+    return result.area_fn, ctrl, base, result
+
+
+def rc_lattice(regularize: bool, Gf: float, Gfc: float, area, *, horizon: float = HORIZON):
+    """The calibrated RC lattice column model (corotTruss struts + rebar). `area` is a uniform float
+    or a length->area callable; `horizon` sets strut connectivity (larger = more redundant bracing
+    against the post-peak mechanism, D31)."""
     model, _ = build_lattice_rc(column_problem(CORE), MESH,
                                 material_for=make_material_for(regularize, Gf, Gfc),
                                 zone_of=zone_of, rebars=rebars(), strut_area=area,
-                                horizon=HORIZON,
+                                horizon=horizon,
                                 strut_element="corotTruss")
     return model
 

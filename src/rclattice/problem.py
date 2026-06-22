@@ -61,11 +61,15 @@ class SteelGrade:
 class Rebar:
     """A reinforcing bar: a polyline `path` (list of (x, y)) with cross-section `area` and a
     steel grade. In the lattice it becomes steel truss struts on the lattice nodes lying on the
-    path (shared nodes => perfect bond, D5/D13). Mesh must align so nodes fall on the path."""
+    path (shared nodes => perfect bond, D5/D13). Mesh must align so nodes fall on the path.
+
+    `role` ("longitudinal" / "stirrup") is a drawing tag only: it flows through the builders to the
+    element `kind` so the visualizer colours longitudinal bars and stirrups/ties distinctly."""
 
     path: list[tuple[float, float]]
     area: float
     steel: SteelGrade
+    role: str = "longitudinal"
 
 
 @dataclass

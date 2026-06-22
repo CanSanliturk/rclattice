@@ -218,6 +218,17 @@ Early scaffolding, built incrementally. Working so far:
   benchmark frame in kip-in, lattice strut area calibrated to the continuum lateral stiffness
   (match ~271 kip/in, both converge to 15 in). 13 tests in [src/tests/](src/tests/), all passing.
 
-Not yet (Stage 2 of D18/D19): nonlinear materials/runner (Concrete02 + Steel02 mappings; Newton
-stepping is wired but exercised only elastically so far), reinforcement (`Rebar` struts on shared
-nodes, D13). Beyond: ASDConcrete3D, gmsh embed, 3D solids, shells, BeamColumnBuilder, results layer.
+- RC column studies (D19–D29, `examples/column/`): nonlinear RC lattice pushover + dynamic, with
+  linear-material siblings, all calibrated to a reference. Materials done: uniaxial Concrete02
+  (length-regularized struts, D20), Steel02 rebar, and nD **ASDConcrete3D + PlaneStress** for the
+  continuum (D29). Reinforcement done: `Rebar` struts on shared nodes (D13). Column pushover compares
+  the lattice to a **selectable reference** — `--reference {beamcolumn,continuum}` (D29 pushover, D30
+  dynamic): the fiber `forceBeamColumn` (1D) or the 2D plane-stress continuum (`build_continuum_rc`,
+  material-matched at the grade level). Pushover: lattice↔continuum agree ~1–2% on peak shear (both
+  capture the 2D/diagonal action the 1D beam-column lacks). Dynamic (D30): the continuum's ASDConcrete3D
+  is configured as **pure damage** (`plastic_frac=0`) — the closest match to the strut Concrete02's
+  hysteresis (coupon-verified); seismic histories track closely, loop *shapes* differ slightly (the
+  irreducible damage-vs-Concrete02 difference). Continuum dynamic is sine-only (heavy ~1.5 s/step).
+
+Not yet: gmsh `embed` discrete bars in the continuum; 3D solids, shells, BeamColumnBuilder; a dedicated
+results layer.

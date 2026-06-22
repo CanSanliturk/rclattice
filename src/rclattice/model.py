@@ -41,12 +41,18 @@ class NDMaterial:
 
 @dataclass
 class Element:
-    """A generic element: ops.element(etype, id, *nodes, *args)."""
+    """A generic element: ops.element(etype, id, *nodes, *args).
+
+    `kind` is a drawing/grouping tag (ignored by the OpenSees layer): "concrete" (concrete
+    strut), "quad" (continuum), or a reinforcement role ("longitudinal" / "stirrup"). It lets the
+    visualizer style reinforcement distinctly from the concrete skeleton.
+    """
 
     id: int
     etype: str
     nodes: tuple[int, ...]
     args: tuple = ()
+    kind: str = "concrete"
 
 
 @dataclass
@@ -86,7 +92,8 @@ class Model:
         self.nodes[node_id] = node
         return node
 
-    def add_element(self, eid: int, etype: str, nodes: tuple[int, ...], args: tuple = ()) -> Element:
-        el = Element(eid, etype, tuple(nodes), tuple(args))
+    def add_element(self, eid: int, etype: str, nodes: tuple[int, ...], args: tuple = (),
+                    *, kind: str = "concrete") -> Element:
+        el = Element(eid, etype, tuple(nodes), tuple(args), kind)
         self.elements.append(el)
         return el

@@ -22,43 +22,68 @@ from __future__ import annotations
 from rclattice import viz
 from rclattice.opensees import run_pushover
 
-from build import beamcolumn_reference, calibrate_area, rc_lattice
-from specimen import DU, GF, GFC, H, MESH, OUT, TARGET, lateral_loads
+from build import (
+    _continuum_model, beamcolumn_reference, calibrate_area, calibrate_groups, make_reference, rc_lattice,
+)
+from specimen import DU, GF, GFC, H, HORIZON, MESH, OUT, TARGET, lateral_loads
+
+REFERENCE_LABEL = {"beamcolumn": "fiber beam-column", "continuum": "2D continuum"}
 
 
-def main(*, regularize: bool = True, Gf: float = GF, Gfc: float = GFC) -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(*, reference: str = "beamcolumn", calibration: str = "scalar", horizon: float = HORIZON,
+         regularize: bool = True, Gf: float = GF, Gfc: float = GFC, draw: bool = False) -> None:
+    outdir = OUT / "pushover" / reference
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    bc = beamcolumn_reference()
-    k_bc = bc["shear"][1] / bc["disp"][1]   # initial (small-drift) lateral stiffness
-    print(f"beam-column: K0={k_bc:.2f} kip/in | peakV={max(bc['shear']):.2f} kip | "
-          f"drift->{bc['disp'][-1]:.2f} in (conv={bc['converged']})")
+    ref = make_reference(reference)
+    label = REFERENCE_LABEL[reference]
+    k_ref = ref["shear"][1] / ref["disp"][1]   # initial (small-drift) lateral stiffness
+    print(f"{label}: K0={k_ref:.2f} kip/in | peakV={max(ref['shear']):.2f} kip | "
+          f"drift->{ref['disp'][-1]:.2f} in (conv={ref['converged']})")
 
-    area, ctrl, base = calibrate_area(k_bc)
-    print(f"calibrated strut area A = {area:.3f} in^2 (K0 match)")
+    if calibration == "groups":
+        area, ctrl, base, cal = calibrate_groups(horizon=horizon)   # strong 2-group fit (D16)
+        o, d = cal.areas["orthogonal"], cal.areas["diagonal"]
+        print(f"strong 2-group calibration (continuum static+modal): orthogonal A={o:.3f}, "
+              f"diagonal A={d:.3f} in^2 (d/o ratio {d/o:.2f}, RMS {cal.rms:.3f}, success={cal.success})")
+    else:
+        area, ctrl, base = calibrate_area(k_ref, horizon=horizon)
+        print(f"scalar calibration: strut area A = {area:.3f} in^2 (K0 match to {label})")
 
     mode = f"length-regularized (Gf={Gf:g}, Gfc={Gfc:g})" if regularize else "plain (no regularization)"
-    print(f"concrete law: Concrete02 {mode}")
+    print(f"concrete law: Concrete02 {mode} | horizon={horizon:g}")
 
-    model = rc_lattice(regularize, Gf, Gfc, area)
+    model = rc_lattice(regularize, Gf, Gfc, area, horizon=horizon)
     print(f"RC lattice column: {len(model.nodes)} nodes, {len(model.elements)} struts")
     lat = run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
                        control_dof=1, dU=DU, target=TARGET, base_nodes=base)
     print(f"lattice: peakV={max(lat['shear']):.2f} kip | drift->{lat['disp'][-1]:.2f} in "
           f"(conv={lat['converged']})")
 
+    suffix = "" if calibration == "scalar" else f"_{calibration}"
+    hz = "" if abs(horizon - HORIZON) < 1e-9 else f"_h{horizon:g}"
+    savepath = outdir / f"column_pushover_{reference}{suffix}{hz}.png"
     viz.figure_pushover(
         [
-            {"disp": bc["disp"], "shear": bc["shear"], "label": "fiber beam-column",
+            {"disp": ref["disp"], "shear": ref["shear"], "label": label,
              "style": {"color": "C3", "lw": 2}},
-            {"disp": lat["disp"], "shear": lat["shear"], "label": "RC lattice",
+            {"disp": lat["disp"], "shear": lat["shear"], "label": f"RC lattice ({calibration} calib.)",
              "style": {"color": "C0", "ls": "--", "lw": 2, "marker": "."}},
         ],
-        savepath=str(OUT / "column_pushover.png"),
+        savepath=str(savepath),
         xlabel="tip displacement (in)", ylabel="base shear (kip)",
-        title="RC cantilever column pushover: lattice vs fiber beam-column",
+        title=f"RC cantilever column pushover: lattice ({calibration} calib.) vs {label}",
     )
-    print(f"saved pushover curve to {OUT / 'column_pushover.png'}")
+    print(f"saved pushover curve to {savepath}")
+
+    if draw:
+        panels = [("RC lattice", model)]
+        if reference == "continuum":
+            panels.insert(0, ("2D continuum", _continuum_model(Gf, Gfc)[0]))
+        drawpath = outdir / f"column_pushover_{reference}{suffix}{hz}_model.png"
+        viz.figure_model(panels, savepath=str(drawpath),
+                         suptitle="RC cantilever column — analysis model")
+        print(f"saved model drawing to {drawpath}")
 
 
 def _base_cut_groups(model, y_cut: float):
@@ -126,15 +151,26 @@ def diagnose(*, regularize: bool = True, Gf: float = GF, Gfc: float = GFC) -> No
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="RC cantilever column pushover: lattice vs fiber beam-column")
+    parser = argparse.ArgumentParser(description="RC cantilever column pushover: lattice vs a selectable reference")
+    parser.add_argument("--reference", choices=("beamcolumn", "continuum"), default="beamcolumn",
+                        help="verification reference: fiber beam-column (fast, default) or 2D continuum (D29)")
+    parser.add_argument("--calibration", choices=("scalar", "groups"), default="scalar",
+                        help="lattice calibration: single K0 scalar (default) or the strong 2-group "
+                             "orthogonal/diagonal fit to the continuum static+modal (D16)")
+    parser.add_argument("--horizon", type=float, default=HORIZON,
+                        help="strut connectivity horizon * mesh_size (default 1.5; larger = more "
+                             "redundant bracing against the post-peak mechanism, D31)")
     parser.add_argument("--no-regularize", dest="regularize", action="store_false",
                         help="use plain Concrete02 instead of the crack-band length-regularized law (D20)")
     parser.add_argument("--gf", type=float, default=GF, help="tensile fracture energy (kip, in); regularized law only")
     parser.add_argument("--gfc", type=float, default=GFC, help="compressive fracture energy (kip, in); regularized law only")
     parser.add_argument("--diagnose", action="store_true",
                         help="decompose the lattice base-cut resistance by element category (overstrength diagnosis)")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis model(s) (rebar highlighted)")
     args = parser.parse_args()
     if args.diagnose:
         diagnose(regularize=args.regularize, Gf=args.gf, Gfc=args.gfc)
     else:
-        main(regularize=args.regularize, Gf=args.gf, Gfc=args.gfc)
+        main(reference=args.reference, calibration=args.calibration, horizon=args.horizon,
+             regularize=args.regularize, Gf=args.gf, Gfc=args.gfc, draw=args.draw)

@@ -410,3 +410,127 @@ Entry format:
   change (mass-proportional-only or modal damping on the reference) or report-only low-pass — a
   mechanical decision deferred to the user, not yet made.
 - **Status:** accepted
+
+### D29 — 2026-06-20 — 2D plane-stress continuum as a selectable verification reference for the RC column
+- **Context:** Extend the column study (`examples/column/`) with a *2D-member* reference for
+  calibration/result comparison, with "an appropriate material model that matches the lattice's
+  material". This is the ContinuumBuilder role (D12/D14): plane-stress `quad` (ndf=2) is the
+  like-for-like continuum for the planar lattice, sharing the same structured node grid.
+- **Decision (user, AskUserQuestion):**
+  (1) **Material = ASDConcrete3D + PlaneStress wrapper** (the D15-planned nD material), curves built
+  from the SAME `ConcreteGrade` as the struts and **crack-band regularized to the quad characteristic
+  length** `lch` (Gf tension / Gfc compression) — the continuum analog of the lattice's
+  length-regularized Concrete02 (D20). The "match" is necessarily at the GRADE level: a uniaxial strut
+  law and a multiaxial continuum law are different objects; both consume the same physical grade.
+  (2) **Reinforcement = longitudinal bars only** as steel truss struts on shared quad nodes (perfect
+  bond, D5/D13) — the 2D continuum itself supplies the lateral/shear path the lattice gets from
+  stirrups, so the stirrups would double-count.
+  (3) **Reference is arg-selectable** like the dynamic excitations: `--reference {beamcolumn,continuum}`
+  picks ONE reference; the lattice strut area is calibrated to THAT reference's K0; the plot shows
+  lattice vs the chosen reference (`column_pushover_<reference>.png`). **Pushover first; dynamic later.**
+- **Why the continuum is the apples-to-apples reference:** the fiber `forceBeamColumn` is 1D and has
+  no analog for the lattice's diagonal-strut / 2D load-spreading (the documented ~17% overstrength;
+  see `pushover.diagnose`). A 2D continuum captures the same 2D action, so lattice-vs-continuum
+  isolates "is the lattice right?" from "is a 1D idealization missing 2D action?".
+- **Mechanics / implementation:**
+  - `materials.concrete_nd_nonlinear(grade, base_tag, wrapper_tag, *, lch, Gf, Gfc)` → (ASDConcrete3D,
+    PlaneStress) pair. Tension `-Te/-Ts/-Td`: elastic to ft at eps_cr=ft/E, linear softening to a small
+    residual at eps_tu=eps_cr+2·Gf/(ft·lch). Compression `-Ce/-Cs/-Cd`: elastic→peak fc at epsc0→soften
+    to fcu at eps_cu=max(epsc0+2·Gfc/((fc+fcu)·lch), epsU). Damage d=clip(1−σ/(E·ε),0,0.95) (isotropic-
+    damage decomposition). **Verified on a single-quad coupon:** reproduces ft and fc; ASDConcrete3D
+    follows the given (Te,Ts) curve with NO hidden auto-regularization, so the pre-regularization is
+    the only regularization (no double-counting) as long as the quads are ≈ `lch`.
+  - `builders.build_continuum_rc(problem, mesh_size, *, nd_material_for, zone_of, rebars, plane, …)`:
+    per-zone nonlinear quads (one nD-material pair per zone — the structured grid has a single quad
+    size, so no per-length split as in the lattice) + longitudinal steel struts on shared nodes. Same
+    grid / mass / supports plumbing as `build_lattice_rc`. nDMaterial and uniaxialMaterial tags are in
+    separate namespaces.
+  - `examples/column/build.py`: `continuum_reference()` + `make_reference(name)`; `specimen.py` gains
+    `longitudinal_rebars()` (and `rebars()` stays bit-identical). `pushover.py`: `--reference` flag.
+- **Result (kip, in):** continuum K0=80.3 kip/in, peak V=39.1 kip (smooth plateau, reached 9.28 in);
+  lattice calibrated to that K0 (strut area 16.26 in²) peaks V=39.8 kip (reached 5.50 in) — **initial
+  stiffness matched, peak shear within ~2%**, post-peak plateau within ~10–15% (lattice settles ~34 kip,
+  noisier). Both `conv=False` past their limit points (normal softening RC). For contrast the 1D
+  beam-column reference is K0=61.5, peak 31.4 — the lattice and continuum agree with EACH OTHER far
+  better than either does with the 1D beam-column, confirming the lattice "overstrength" is genuine 2D
+  action, not an artifact. (A single-quad coupon check is what caught an early compression-curve
+  overshoot — the elastic point must reach 0.4·fc at strain 0.4·fc/E, not 0.4·epsc0.)
+- **Cost / known-open:** the continuum is heavy (1536 ASDConcrete3D quads, ~6 s/step) → a coarser
+  `dU=0.1`; ASDConcrete3D `-implex` would speed/robustify it but introduces error and needs controlled
+  steps — left off (a future option). The reference K0 is the first-step secant (like the beam-column),
+  so it is `dU`-sensitive because concrete cracks at very low drift. Pre-existing, unrelated:
+  `tests/test_rc.py::test_nonlinear_pushover_runs_and_yields` fails on the clean baseline too (portal-
+  frame `build_lattice_rc` path, untouched here).
+- **Status:** accepted (pushover). A dynamic continuum reference (the seismic siblings) is deferred to
+  next, per the user's staging.
+
+### D30 — 2026-06-21 — Dynamic continuum reference; ASDConcrete3D hysteresis matched to Concrete02 by PURE DAMAGE
+- **Context:** Extend D29 to the seismic time-history (`dynamic.py`). For a monotonic pushover only the
+  backbone matters (D29 matched it at the grade level), but a DYNAMIC run is governed by the cyclic
+  HYSTERESIS — and the lattice strut law (uniaxial Concrete02, Kent-Park-Yassin unloading) and the
+  continuum law (ASDConcrete3D, a continuum damage model) are different constitutive theories that
+  cannot be made identical. The question (user): how to configure the nD material so its hysteresis
+  matches Concrete02's.
+- **Finding (single-quad cyclic coupon vs a Concrete02 truss):** the ASDConcrete3D damage value sets
+  the damage↔plasticity split — it back-computes plastic strain as `eps_p = eps − σ/((1−d)·E)`. With
+  `d = 1 − σ/(E·ε)` (PURE isotropic damage, unload toward the origin, no residual) the loops match
+  Concrete02 best: dissipated energy ~108%, comparable residual strain. Introducing plasticity (lower
+  `d`, residual strain) OVERSHOOTS — ~134% dissipation and larger residual at +30%. The unloading
+  SHAPE still differs (ASD unloads ~linearly down the damaged secant; Concrete02 curves), an
+  irreducible theory difference, but the energetics (what governs seismic response) are close.
+- **Decision (user, AskUserQuestion):** (1) **pure damage** is the dynamic-hysteresis configuration —
+  exposed as `concrete_nd_nonlinear(..., plastic_frac=0.0)` (documented; >0 scales damage down to add
+  plasticity). The monotonic backbone is independent of `plastic_frac`, so the D29 pushover is
+  unchanged. (2) **Wire the continuum dynamic reference, sine only** — a full continuum time-history is
+  heavy (~1.5 s/step over 1536 ASDConcrete3D quads; the lattice is ~1.35 s/step too — 7902 corotTruss
+  struts are not cheap), so El Centro (~3000+ steps) is impractical and guarded off.
+- **Mechanics / implementation:**
+  - `materials.concrete_nd_nonlinear` gains `plastic_frac` (scales the damage table by `1−plastic_frac`).
+  - `build.py`: `_continuum_model` factored out; `continuum_k0()` (one tiny continuum pushover step) and
+    `continuum_dynamic(accel, dt_record, scale, top_mass, dt, …)` (bakes the axial-load tributary mass
+    on the top nodes, then `run_dynamic`).
+  - `dynamic.py`: `--reference {beamcolumn,continuum}`. For the continuum the lattice is calibrated to
+    the **continuum K0** (so lattice and continuum share mass+stiffness+T1 → the comparison isolates the
+    Concrete02-vs-ASD hysteresis), the sine cycles are capped (`CONTINUUM_CYCLES=8`), and the intensity
+    is still tuned on the **cheap fiber column** (the only affordable proxy; its K0 differs from the
+    matched lattice/continuum so the achieved drift is approximate — fine, both get the identical scaled
+    record). El Centro + continuum is rejected at the CLI. Output `column_dynamic_<reference>_<exc>.png`
+    (+ `_hyst.png`) — note this renames the beam-column dynamic outputs too (was `column_dynamic_<exc>`).
+- **Result (kip, in; resonant sine at T1=0.452 s, 8 cycles, scale 0.168×, both `conv=True` through all
+  8 cycles):** roof-drift and base-shear **histories track closely**; peak drift lattice 1.12 vs
+  continuum 0.85 in, residual +0.26 vs +0.31 in, peak shear 43.3 vs 39.2 kip (~10–25%). The hysteresis
+  **envelopes coincide** (both ±40 kip) but the **loop shapes differ** — the continuum's are fuller/
+  rounder, the lattice's more pinched — exactly the coupon's irreducible Concrete02-vs-damage difference.
+- **Status:** accepted. Same pre-existing unrelated test failure as D29 noted; 25 unit tests pass.
+  Possible follow-ups (user): tune the continuum intensity on a continuum-matched cheap proxy for an
+  exact drift target; ASDConcrete3D `-implex` to cut the ~1.5 s/step.
+
+### D32 — 2026-06-22 — Opt-in analysis-model drawings (`--draw`) with reinforcement styled by kind
+- **Decision:** every analysis entry script (column + frame) gains an OPT-IN `--draw` flag
+  (`action="store_true"`, OFF by default) that, in addition to the result plots, saves a drawing of
+  the analysis model(s) it builds. In the lattice drawing, reinforcement is styled distinctly from the
+  concrete skeleton — a different colour AND a heavier lineweight — and **longitudinal bars vs
+  stirrups/ties get different colours** (per user instruction). Default by off so the existing fast runs
+  are unchanged.
+- **Mechanism:** a backend-agnostic per-element drawing tag `Element.kind` (NOT seen by the OpenSees
+  layer): "concrete" (default strut), "quad" (continuum), or a reinforcement role. `Rebar` gains
+  `role` ("longitudinal" default / "stirrup"), threaded by the builders into the rebar struts' `kind`
+  (`build_lattice_rc`, `build_continuum_rc`); the column specimen tags its hoop ties `role="stirrup"`.
+  `viz.figure_model(panels)` / `draw_model_kinds` render the undeformed model, grouping line elements by
+  `kind` (concrete grey/thin; longitudinal C3/red; stirrup C2/green; generic rebar C1 — rebar weights
+  kept light so they don't swamp the skeleton) with a legend, and continuum quads as light polygons.
+  `figure_model` lays out ONE ROW PER MODEL × THREE COLUMNS — concrete skeleton only / reinforcement
+  only / combined (`draw_model_kinds(which=...)`), with a shared per-model extent so the panels align.
+  Each script saves `<result-stem>_model.png`; the heavy dynamic scripts draw up front (before the
+  time-history). For the continuum-reference column runs the continuum model is also drawn (via
+  `build._continuum_model`).
+- **Output layout:** figures are organised `output/<modeltype>/<analysis>/<reference>/<file>` — e.g.
+  `output/column/dynamic/beamcolumn/…`, `output/column/pushover/continuum/…`,
+  `output/frame/pushover_rc/beamcolumn/…`. `OUT` (from each `specimen.py`) is the model-type dir;
+  each script sets `outdir = OUT / <analysis> / <reference>` and `mkdir(parents=True)`. The reference
+  is the CLI `--reference` for the column pushover/dynamic, and fixed otherwise (linear siblings +
+  `pushover_rc` → `beamcolumn`; elastic frame `pushover`/`visualize` → `continuum`). Filenames are
+  unchanged (args still encoded in the name), so the reference appears in both path and filename.
+- **Status:** accepted. Additive only — `kind`/`role` carry defaults and do not change the FE assembly
+  numerically (test suite numerically unchanged: 25 pass + the same one pre-existing nonlinear-pushover
+  failure from the in-progress materials WIP). Verified end-to-end on `column/pushover_linear.py --draw`.

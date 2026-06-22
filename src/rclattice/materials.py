@@ -21,6 +21,74 @@ def concrete_nd_elastic(grade: ConcreteGrade, tag: int) -> NDMaterial:
     return NDMaterial(tag, "ElasticIsotropic", (grade.E, grade.nu))
 
 
+def concrete_nd_nonlinear(
+    grade: ConcreteGrade,
+    base_tag: int,
+    wrapper_tag: int,
+    *,
+    lch: float,
+    Gf: float | None = None,
+    Gfc: float | None = None,
+    tension_residual: float = 0.02,
+    max_damage: float = 0.95,
+    plastic_frac: float = 0.0,
+) -> tuple[NDMaterial, NDMaterial]:
+    """Nonlinear nD concrete for plane-stress quads (D29): ASDConcrete3D + a PlaneStress wrapper.
+
+    The continuum analog of the lattice's length-regularized uniaxial Concrete02 (D20): the SAME
+    physical grade (E, nu, ft, fc, epsc0, fcu, epsU) maps here to a 3D damage law whose tension and
+    compression softening branches are crack-band regularized by the element characteristic length
+    `lch` (the quad size), so dissipation is mesh-objective and matches the lattice's per-strut
+    regularization. ASDConcrete3D is driven by uniaxial curves given as POSITIVE magnitudes:
+      - tension `-Te/-Ts/-Td`: elastic to `ft` at `eps_cr=ft/E`, then linear softening to a small
+        residual `tension_residual*ft` at `eps_tu = eps_cr + 2*Gf/(ft*lch)`;
+      - compression `-Ce/-Cs/-Cd`: elastic to ~0.4*fc, peak `fc` at `epsc0`, softening to `fcu` at
+        `eps_cu = max(epsc0 + 2*Gfc/((fc+fcu)*lch), epsU)`.
+    `Gf` defaults to DEFAULT_GF, `Gfc` to DEFAULT_GFC_FACTOR*Gf (same as the strut law). Returns the
+    (ASDConcrete3D base, PlaneStress wrapper) pair; the quad element uses the wrapper tag.
+
+    HYSTERESIS / `plastic_frac` (D30) — controls the damage↔plasticity split, hence the cyclic
+    unloading and the match to the lattice's Concrete02 under DYNAMIC loading (irrelevant to a
+    monotonic pushover, which follows the backbone Ts/Cs regardless). ASDConcrete3D back-computes the
+    plastic strain from the supplied damage as `eps_p = eps - sigma/((1-d)*E)`, so:
+      - `plastic_frac=0` → `d = clip(1 - sigma/(E*eps), 0, max_damage)`: PURE isotropic damage,
+        unloading toward the origin, NO plastic strain. A cyclic single-quad coupon shows this is the
+        closest available match to Concrete02 (dissipated energy ~108%, comparable residual strain);
+      - `plastic_frac>0` scales the damage DOWN (`d *= 1-plastic_frac`), introducing residual strain /
+        plasticity — biases toward residual-drift matching but OVERSHOOTS Concrete02's dissipation
+        (~134% at 0.3). Pure damage (the default) is the recommended dynamic-hysteresis configuration.
+    """
+    if grade.fc is None or grade.epsc0 is None or grade.fcu is None or grade.epsU is None:
+        raise ValueError(f"grade {grade.name!r} lacks nonlinear params (fc/epsc0/fcu/epsU)")
+    E, nu, fc, ft = grade.E, grade.nu, grade.fc, grade.ft if grade.ft is not None else 0.1 * grade.fc
+    epsc0, fcu, epsU = grade.epsc0, grade.fcu, grade.epsU
+    gf = Gf if Gf is not None else (grade.Gf if grade.Gf is not None else DEFAULT_GF)
+    gfc = Gfc if Gfc is not None else DEFAULT_GFC_FACTOR * gf
+
+    def damage(eps: list[float], sig: list[float]) -> list[float]:
+        return [0.0 if e <= 0.0 else (1.0 - plastic_frac) * max(0.0, min(max_damage, 1.0 - s / (E * e)))
+                for e, s in zip(eps, sig)]
+
+    eps_cr = ft / E
+    eps_tu = eps_cr + 2.0 * gf / (ft * lch)
+    Te = [0.0, eps_cr, eps_tu]
+    Ts = [0.0, ft, tension_residual * ft]
+    Td = damage(Te, Ts)
+
+    eps_a = 0.4 * fc / E   # strain where the elastic line (slope E) reaches 0.4*fc (< epsc0 always,
+    #                        since the initial tangent E exceeds the secant fc/epsc0 for concrete);
+    #                        using 0.4*epsc0 would overshoot fc because E*0.4*epsc0 > fc.
+    eps_cu = max(epsc0 + 2.0 * gfc / ((fc + fcu) * lch), epsU)
+    Ce = [0.0, eps_a, epsc0, eps_cu]
+    Cs = [0.0, 0.4 * fc, fc, fcu]
+    Cd = damage(Ce, Cs)
+
+    base = NDMaterial(base_tag, "ASDConcrete3D",
+                      (E, nu, "-Te", *Te, "-Ts", *Ts, "-Td", *Td, "-Ce", *Ce, "-Cs", *Cs, "-Cd", *Cd))
+    wrapper = NDMaterial(wrapper_tag, "PlaneStress", (base_tag,))
+    return base, wrapper
+
+
 def concrete_uniaxial_nonlinear(grade: ConcreteGrade, tag: int) -> UniaxialMaterial:
     """Uniaxial Concrete02 for lattice struts (D19, fork: tension + softening).
 

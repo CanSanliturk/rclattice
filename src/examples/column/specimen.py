@@ -48,16 +48,22 @@ def zone_of(x: float, y: float) -> str:
     return "cover" if abs(x) >= W / 2.0 - COVER - EPS else "core"
 
 
+def longitudinal_rebars() -> tuple[Rebar, ...]:
+    """The three vertical longitudinal bars (x = -10.5, 0, +10.5), as steel struts on shared nodes.
+    Shared by the lattice (with stirrups added) and the continuum reference (longitudinal only, D29)."""
+    return tuple(Rebar([(dx, 0.0), (dx, H)], area, STEEL)
+                 for dx, area in ((-10.5, 1.8), (0.0, 1.2), (10.5, 1.8)))
+
+
 def rebars() -> tuple[Rebar, ...]:
     """Longitudinal bars (vertical) + transverse stirrup ties (horizontal across the core, one
     per mesh row): the transverse steel gives the lattice a non-softening lateral/shear path so
     the confined core does not disintegrate into a local mechanism past yield (D23)."""
-    longitudinal = tuple(Rebar([(dx, 0.0), (dx, H)], area, STEEL)
-                         for dx, area in ((-10.5, 1.8), (0.0, 1.2), (10.5, 1.8)))
     nrows = int(round(H / MESH))
-    stirrups = tuple(Rebar([(-10.5, round(i * MESH, 6)), (10.5, round(i * MESH, 6))], STIRRUP_AREA, STEEL)
+    stirrups = tuple(Rebar([(-10.5, round(i * MESH, 6)), (10.5, round(i * MESH, 6))], STIRRUP_AREA, STEEL,
+                           role="stirrup")
                      for i in range(nrows + 1))
-    return longitudinal + stirrups
+    return longitudinal_rebars() + stirrups
 
 
 def lateral_loads(model) -> list[Load]:

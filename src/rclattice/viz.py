@@ -83,6 +83,105 @@ def draw_model(ax, model: Model, disp=None, scale: float = 1.0, *, undeformed=Tr
         ax.set_title(title, fontsize=9)
 
 
+# Per-kind styling for the undeformed analysis-model drawing. Reinforcement is drawn in distinct
+# colours (longitudinal vs stirrup/tie), with lineweights kept light so they don't swamp the
+# concrete skeleton in the combined view.
+_KIND_STYLE = {
+    "concrete":     {"color": "0.6",  "lw": 0.4, "zorder": 2, "label": "concrete struts"},
+    "longitudinal": {"color": "C3",   "lw": 1.1, "zorder": 5, "label": "longitudinal rebar"},
+    "stirrup":      {"color": "C2",   "lw": 0.9, "zorder": 4, "label": "stirrup / tie"},
+    "rebar":        {"color": "C1",   "lw": 1.0, "zorder": 4, "label": "rebar"},
+}
+_KIND_DEFAULT = {"color": "C0", "lw": 0.8, "zorder": 3, "label": "strut"}
+
+_CONCRETE_KINDS = {"concrete", "quad"}            # concrete skeleton (struts + continuum quads)
+_REBAR_KINDS = {"longitudinal", "stirrup", "rebar"}  # reinforcement
+
+
+def draw_model_kinds(ax, model: Model, *, which="all", title=None, legend=True, lim=None):
+    """Draw the UNDEFORMED analysis model, styling each element by its `kind`: concrete struts thin
+    and grey, continuum quads as light polygons, and reinforcement in distinct colours (longitudinal
+    vs stirrup). `which` selects what to show: "concrete" (skeleton only), "rebar" (reinforcement
+    only), or "all" (combined). `lim` is an optional ((x0,x1),(y0,y1)) to force a shared extent so
+    the three panels of `figure_model` line up. Used for the `--draw` analysis-model figures."""
+    ids, idx, pts, _lines, quads = _arrays(model)
+    show_concrete = which in ("concrete", "all")
+    show_rebar = which in ("rebar", "all")
+
+    if quads and show_concrete:
+        ax.add_collection(PolyCollection(_verts(pts, quads), facecolors="0.92", edgecolors="0.78",
+                                         linewidths=0.4, zorder=1))
+
+    groups: dict[str, list] = {}
+    for e in model.elements:
+        if len(e.nodes) != 2:
+            continue
+        if e.kind in _CONCRETE_KINDS and not show_concrete:
+            continue
+        if e.kind in _REBAR_KINDS and not show_rebar:
+            continue
+        groups.setdefault(e.kind, []).append([pts[idx[e.nodes[0]]], pts[idx[e.nodes[1]]]])
+
+    handles, labels = [], []
+    for kind in sorted(groups, key=lambda k: _KIND_STYLE.get(k, _KIND_DEFAULT)["zorder"]):
+        st = _KIND_STYLE.get(kind, _KIND_DEFAULT)
+        ax.add_collection(LineCollection(groups[kind], colors=st["color"], linewidths=st["lw"],
+                                         zorder=st["zorder"]))
+        handles.append(plt.Line2D([], [], color=st["color"], lw=max(st["lw"], 1.2)))
+        labels.append(st["label"])
+
+    ax.set_aspect("equal")
+    if lim is not None:
+        ax.set_xlim(*lim[0])
+        ax.set_ylim(*lim[1])
+    else:
+        ax.autoscale()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if title:
+        ax.set_title(title, fontsize=9)
+    if legend and handles:
+        ax.legend(handles, labels, fontsize=7, loc="upper right", framealpha=0.85)
+
+
+def _model_lim(model: Model, *, margin=0.05):
+    """Shared ((x0,x1),(y0,y1)) extent for a model, with a small relative margin."""
+    pts = np.array([n.coords for n in model.nodes.values()], dtype=float)
+    (x0, y0), (x1, y1) = pts.min(axis=0), pts.max(axis=0)
+    mx = margin * max(x1 - x0, 1e-9)
+    my = margin * max(y1 - y0, 1e-9)
+    return ((x0 - mx, x1 + mx), (y0 - my, y1 + my))
+
+
+def figure_model(panels, *, savepath=None, suptitle="Analysis model", dpi=170):
+    """Draw one or more undeformed analysis models, one ROW per model and three columns:
+    concrete skeleton only, reinforcement only, and combined. `panels` is a list of (title, Model).
+
+    Each panel is sized to the model's true aspect ratio (so a tall, narrow column is drawn tall and
+    narrow rather than squeezed into a wide axes), which spreads the dense lattice out enough to
+    inspect the struts. High DPI + thin concrete lines keep the skeleton legible even when crowded."""
+    cols = (("concrete", "concrete lattice"), ("rebar", "reinforcement"), ("all", "combined"))
+    n = len(panels)
+    lims = [_model_lim(model) for _, model in panels]
+    # per-panel size from the tallest aspect (h/w) across models; clamp width so squat models stay sane
+    aspect = max(((ly[1] - ly[0]) / max(lx[1] - lx[0], 1e-9)) for lx, ly in lims)
+    panel_h = 7.5
+    panel_w = float(np.clip(panel_h / max(aspect, 1e-9), 1.7, 6.5))
+    fig, axes = plt.subplots(n, 3, figsize=(3 * panel_w + 0.6, n * panel_h + 0.7), squeeze=False)
+    for r, ((title, model), lim) in enumerate(zip(panels, lims)):
+        for c, (which, col_label) in enumerate(cols):
+            ax = axes[r][c]
+            draw_model_kinds(ax, model, which=which, lim=lim, legend=(which != "concrete"))
+            if r == 0:
+                ax.set_title(col_label, fontsize=10)
+        axes[r][0].set_ylabel(title, fontsize=10)
+    fig.suptitle(suptitle, fontsize=11)
+    fig.tight_layout()
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+    return fig
+
+
 def align_sign(reference: dict, shape: dict) -> dict:
     """Flip `shape`'s sign to best match `reference` (both keyed by the same node ids)."""
     keys = reference.keys() & shape.keys()

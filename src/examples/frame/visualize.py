@@ -36,8 +36,9 @@ def frame_problem() -> Problem:
     return Problem(ndm=2, ndf=2, domain=domain, material=grade, supports=supports, loads=loads)
 
 
-def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(*, draw: bool = False) -> None:
+    outdir = OUT / "visualize" / "continuum"
+    outdir.mkdir(parents=True, exist_ok=True)
     problem = frame_problem()
 
     # static-scalar area calibration (lateral dof = 0): deflection ~ 1/area
@@ -50,9 +51,14 @@ def main() -> None:
     lattice, _ = build_lattice(problem, MESH, strut_area=area)
     continuum, _ = build_continuum(problem, MESH, plane=PLANE)
 
+    if draw:
+        viz.figure_model([("lattice", lattice), ("continuum", continuum)],
+                         savepath=str(outdir / "frame_model.png"), suptitle="Portal frame — analysis model")
+        print(f"saved model drawing to {outdir / 'frame_model.png'}")
+
     lat_static = run_static(lattice)["disps"]
     cont_static = run_static(continuum)["disps"]
-    viz.figure_static(lattice, lat_static, continuum, cont_static, savepath=str(OUT / "frame_static.png"))
+    viz.figure_static(lattice, lat_static, continuum, cont_static, savepath=str(outdir / "frame_static.png"))
 
     lat_modal = run_modal(lattice, N_MODES)
     cont_modal = run_modal(continuum, N_MODES)
@@ -65,13 +71,19 @@ def main() -> None:
         }
         for i in range(N_MODES)
     ]
-    viz.figure_modes(panels, savepath=str(OUT / "frame_modes.png"))
-    viz.animate_modes(panels, savepath=str(OUT / "frame_modes.gif"))
+    viz.figure_modes(panels, savepath=str(outdir / "frame_modes.png"))
+    viz.animate_modes(panels, savepath=str(outdir / "frame_modes.gif"))
 
     print("continuum periods (s):", [f"{t:.4f}" for t in cont_modal["periods"]])
     print("lattice   periods (s):", [f"{t:.4f}" for t in lat_modal["periods"]])
-    print(f"saved figures + gif to {OUT}")
+    print(f"saved figures + gif to {outdir}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Portal frame lattice-vs-continuum visualization")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis models (undeformed)")
+    args = parser.parse_args()
+    main(draw=args.draw)

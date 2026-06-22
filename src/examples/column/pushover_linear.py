@@ -27,8 +27,9 @@ from build import beamcolumn_reference_linear, calibrate_area_linear, lattice_k0
 from specimen import DU, OUT, TARGET, lateral_loads
 
 
-def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(*, draw: bool = False) -> None:
+    outdir = OUT / "pushover_linear" / "beamcolumn"
+    outdir.mkdir(parents=True, exist_ok=True)
 
     bc = beamcolumn_reference_linear()
     k_bc = bc["shear"][1] / bc["disp"][1]
@@ -53,12 +54,24 @@ def main() -> None:
             {"disp": lat["disp"], "shear": lat["shear"], "label": "elastic RC lattice",
              "style": {"color": "C0", "ls": "--", "lw": 2, "marker": "."}},
         ],
-        savepath=str(OUT / "column_pushover_linear.png"),
+        savepath=str(outdir / "column_pushover_linear.png"),
         xlabel="tip displacement (in)", ylabel="base shear (kip)",
         title="LINEAR RC cantilever column pushover: lattice vs fiber beam-column",
     )
-    print(f"saved pushover curve to {OUT / 'column_pushover_linear.png'}")
+    print(f"saved pushover curve to {outdir / 'column_pushover_linear.png'}")
+
+    if draw:
+        drawpath = outdir / "column_pushover_linear_model.png"
+        viz.figure_model([("RC lattice (linear)", model)], savepath=str(drawpath),
+                         suptitle="LINEAR RC cantilever column — analysis model")
+        print(f"saved model drawing to {drawpath}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="LINEAR RC cantilever column pushover")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis model (rebar highlighted)")
+    args = parser.parse_args()
+    main(draw=args.draw)

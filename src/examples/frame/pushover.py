@@ -27,8 +27,9 @@ from specimen import COL, DU, EPS, FRAME_ELASTIC, H, OUT, SPAN, TARGET, frame_pr
 MESH = 6.0
 
 
-def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(*, draw: bool = False) -> None:
+    outdir = OUT / "pushover" / "continuum"
+    outdir.mkdir(parents=True, exist_ok=True)
     problem = frame_problem(FRAME_ELASTIC)
 
     # lattice and continuum share the identical node grid -> same ids for control/base/loads.
@@ -64,12 +65,24 @@ def main() -> None:
             {"disp": lat_res["disp"], "shear": lat_res["shear"], "label": "lattice (calibrated)",
              "style": {"color": "C0", "ls": "--", "lw": 2}},
         ],
-        savepath=str(OUT / "frame_pushover.png"),
+        savepath=str(outdir / "frame_pushover.png"),
         xlabel="roof displacement (in)", ylabel="base shear (kip)",
         title="Elastic pushover (Stage 1): lattice vs continuum",
     )
-    print(f"saved pushover curve to {OUT / 'frame_pushover.png'}")
+    print(f"saved pushover curve to {outdir / 'frame_pushover.png'}")
+
+    if draw:
+        drawpath = outdir / "frame_pushover_model.png"
+        viz.figure_model([("lattice", lattice_cal), ("continuum", continuum)],
+                         savepath=str(drawpath), suptitle="Elastic frame (Stage 1) — analysis model")
+        print(f"saved model drawing to {drawpath}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Elastic frame pushover (Stage 1): lattice vs continuum")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis models (lattice + continuum)")
+    args = parser.parse_args()
+    main(draw=args.draw)

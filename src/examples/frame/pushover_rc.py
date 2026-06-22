@@ -52,8 +52,9 @@ def calibrate_area() -> float:
     return k_cont / k_unit
 
 
-def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(*, draw: bool = False) -> None:
+    outdir = OUT / "pushover_rc" / "beamcolumn"
+    outdir.mkdir(parents=True, exist_ok=True)
 
     area = calibrate_area()
     print(f"calibrated concrete strut area A = {area:.4e} in^2")
@@ -72,6 +73,12 @@ def main() -> None:
     base = select_nodes(model, (-COL, SPAN + COL, -EPS, EPS))
     print(f"RC lattice: {len(model.nodes)} nodes, {len(model.elements)} struts | control {ctrl}")
 
+    if draw:
+        drawpath = outdir / "frame_pushover_rc_model.png"
+        viz.figure_model([("RC lattice", model)], savepath=str(drawpath),
+                         suptitle="RC frame (Stage 2) — analysis model")
+        print(f"saved model drawing to {drawpath}")
+
     lat = run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
                        control_dof=1, dU=DU, target=TARGET, base_nodes=base)
     print(f"lattice pushover: converged={lat['converged']} | drift {lat['disp'][-1]:.2f} in | "
@@ -88,12 +95,18 @@ def main() -> None:
             {"disp": lat["disp"], "shear": lat["shear"], "label": "RC lattice",
              "style": {"color": "C0", "ls": "--", "lw": 2}},
         ],
-        savepath=str(OUT / "frame_pushover_rc.png"),
+        savepath=str(outdir / "frame_pushover_rc.png"),
         xlabel="roof displacement (in)", ylabel="base shear (kip)",
         title="RC frame pushover (Stage 2): lattice vs benchmark",
     )
-    print(f"saved pushover curve to {OUT / 'frame_pushover_rc.png'}")
+    print(f"saved pushover curve to {outdir / 'frame_pushover_rc.png'}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="RC frame pushover (Stage 2): lattice vs benchmark")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis model (rebar highlighted)")
+    args = parser.parse_args()
+    main(draw=args.draw)

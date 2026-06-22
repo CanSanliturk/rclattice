@@ -40,8 +40,9 @@ DT = 0.01              # Newmark step (record is at 0.02 s)
 
 
 def main(*, target_drift: float = TARGET_DRIFT, dt: float = DT,
-         excitation: str = "sine", n_cycles: int = N_CYCLES) -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+         excitation: str = "sine", n_cycles: int = N_CYCLES, draw: bool = False) -> None:
+    outdir = OUT / "dynamic_linear" / "beamcolumn"
+    outdir.mkdir(parents=True, exist_ok=True)
 
     self_mass = RHO * W * H * THK            # total column self-mass (rho * volume)
     top_mass = P / G                         # axial load P treated as tributary seismic mass
@@ -66,6 +67,12 @@ def main(*, target_drift: float = TARGET_DRIFT, dt: float = DT,
 
     lat_T = run_modal(model, 2)["periods"]
     print(f"lattice periods: T1={lat_T[0]:.3f}s  T2={lat_T[1]:.3f}s")
+
+    if draw:
+        drawpath = outdir / f"column_dynamic_linear_{excitation}_model.png"
+        viz.figure_model([("RC lattice (linear)", model)], savepath=str(drawpath),
+                         suptitle="LINEAR RC cantilever column — analysis model")
+        print(f"saved model drawing to {drawpath}")
 
     # base excitation (resonant sine at T1 by default; built AFTER the modal step)
     accel, dt_rec, exc_label = make_excitation(excitation, lat_T[0], n_cycles)
@@ -98,12 +105,12 @@ def main(*, target_drift: float = TARGET_DRIFT, dt: float = DT,
     ]
     base_title = f"LINEAR {exc_label} {used:.2f}x (T1~{lat_T[0]:.2f}s): RC lattice vs fiber beam-column"
     viz.figure_timehistory(series, include_hysteresis=False,
-                           savepath=str(OUT / f"column_dynamic_linear_{excitation}.png"), title=base_title)
+                           savepath=str(outdir / f"column_dynamic_linear_{excitation}.png"), title=base_title)
     # separate hysteresis loops (lattice, fiber, overlaid) in addition to the overlaid histories
     viz.figure_hysteresis(list(reversed(series)),
-                          savepath=str(OUT / f"column_dynamic_linear_{excitation}_hyst.png"),
+                          savepath=str(outdir / f"column_dynamic_linear_{excitation}_hyst.png"),
                           title=f"Hysteresis — {base_title}")
-    print(f"saved to {OUT / f'column_dynamic_linear_{excitation}.png'} (+ _hyst.png)")
+    print(f"saved to {outdir / f'column_dynamic_linear_{excitation}.png'} (+ _hyst.png)")
 
 
 if __name__ == "__main__":
@@ -115,5 +122,8 @@ if __name__ == "__main__":
     parser.add_argument("--excitation", choices=("sine", "elcentro"), default="sine",
                         help="base excitation: resonant sine at T1 (default) or the El Centro record")
     parser.add_argument("--n-cycles", type=int, default=N_CYCLES, help="number of cycles for the sine excitation")
+    parser.add_argument("--draw", action="store_true",
+                        help="also save a drawing of the analysis model (rebar highlighted)")
     args = parser.parse_args()
-    main(target_drift=args.target_drift, dt=args.dt, excitation=args.excitation, n_cycles=args.n_cycles)
+    main(target_drift=args.target_drift, dt=args.dt, excitation=args.excitation, n_cycles=args.n_cycles,
+         draw=args.draw)

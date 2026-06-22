@@ -15,7 +15,7 @@ import numpy as np
 
 from .materials import concrete_nd_elastic, concrete_uniaxial_elastic, steel_uniaxial
 from .mesh import connect_horizon, mesh_compound_rectangles
-from .model import Load, Model, Support, UniaxialMaterial
+from .model import Load, Model, NDMaterial, Support, UniaxialMaterial
 from .problem import BoxLoad, BoxSupport, EdgeLoad, EdgeSupport, Problem, Rebar
 from .reinforcement import rebar_node_chain
 
@@ -120,7 +120,7 @@ def build_lattice_rc(
             tag += 1
         chain = rebar_node_chain(coords, rb.path, rebar_tol)
         for a, b in zip(chain, chain[1:]):
-            model.add_element(eid, strut_element, (a + 1, b + 1), (rb.area, steel_tag[gid]))
+            model.add_element(eid, strut_element, (a + 1, b + 1), (rb.area, steel_tag[gid]), kind=rb.role)
             eid += 1
 
     _assign_tributary_mass(model, coords, quads, problem)
@@ -149,7 +149,75 @@ def build_continuum(
     thickness = problem.domain.thickness
     for eid, q in enumerate(quads, start=1):
         nodes = tuple(i + 1 for i in q)
-        model.add_element(eid, "quad", nodes, (thickness, plane, mat.id))
+        model.add_element(eid, "quad", nodes, (thickness, plane, mat.id), kind="quad")
+
+    _assign_tributary_mass(model, coords, quads, problem)
+    edges = _edges(coords)
+    _apply_supports_loads(model, problem, coords, edges)
+    return model, edges
+
+
+def build_continuum_rc(
+    problem: Problem,
+    mesh_size: float,
+    *,
+    nd_material_for: "Callable[[str], tuple[NDMaterial, NDMaterial]]",
+    zone_of: "Callable[[float, float], str]",
+    rebars: "tuple[Rebar, ...]" = (),
+    plane: str = "PlaneStress",
+    rebar_tol: float = 1e-6,
+    rebar_material: "Callable[[object, int], UniaxialMaterial]" = steel_uniaxial,
+) -> tuple[Model, EdgeNodes]:
+    """RC continuum builder (D29): per-zone nonlinear nD-concrete quads + steel rebar struts.
+
+    The continuum verification reference that matches the RC lattice (D12/D14): the SAME structured
+    node grid, plane-stress `quad` elements with a nonlinear nD concrete (ASDConcrete3D + PlaneStress
+    wrapper, length-regularized — see `materials.concrete_nd_nonlinear`), and reinforcement as steel
+    truss struts on the shared quad nodes (perfect bond, D5/D13). Like-for-like with `build_lattice_rc`
+    so the two pushovers are directly comparable.
+
+    `nd_material_for(zone)` returns the (ASDConcrete3D base, PlaneStress wrapper) NDMaterial pair for a
+    zone; each pair is emitted once (cached by zone — the structured grid has a single quad size, so
+    no per-length split as in the lattice) with builder-assigned, namespace-separate nDMaterial tags,
+    and the quad uses the wrapper tag. The zone comes from `zone_of(x, y)` at the quad centroid. Each
+    `Rebar` becomes steel struts on its on-path nodes via `rebar_material` (one material per grade).
+    Same grid / mass / supports / loads plumbing as the other builders.
+    """
+    coords, quads = _grid(problem, mesh_size)
+    model = Model(ndm=2, ndf=2)
+    thickness = problem.domain.thickness
+
+    for idx, (x, y) in enumerate(coords, start=1):
+        model.add_node(idx, (float(x), float(y)))
+
+    nd_tag = 1
+    zone_wrapper: dict[str, int] = {}  # zone -> PlaneStress wrapper tag (one nD material pair per zone)
+    for eid, q in enumerate(quads, start=1):
+        cx, cy = coords[list(q)].mean(axis=0)
+        zone = zone_of(float(cx), float(cy))
+        if zone not in zone_wrapper:
+            base, wrapper = nd_material_for(zone)
+            base.id, wrapper.id, wrapper.args = nd_tag, nd_tag + 1, (nd_tag,)
+            model.nd_materials.extend((base, wrapper))
+            zone_wrapper[zone] = nd_tag + 1
+            nd_tag += 2
+        nodes = tuple(i + 1 for i in q)
+        model.add_element(eid, "quad", nodes, (thickness, plane, zone_wrapper[zone]), kind="quad")
+
+    eid = len(quads) + 1
+    steel_tag_counter = 1
+    steel_tag: dict[int, int] = {}  # id(SteelGrade) -> uniaxial material tag (one per grade)
+    for rb in rebars:
+        gid = id(rb.steel)
+        if gid not in steel_tag:
+            mat = rebar_material(rb.steel, steel_tag_counter)
+            model.uniaxial_materials.append(mat)
+            steel_tag[gid] = steel_tag_counter
+            steel_tag_counter += 1
+        chain = rebar_node_chain(coords, rb.path, rebar_tol)
+        for a, b in zip(chain, chain[1:]):
+            model.add_element(eid, "Truss", (a + 1, b + 1), (rb.area, steel_tag[gid]), kind=rb.role)
+            eid += 1
 
     _assign_tributary_mass(model, coords, quads, problem)
     edges = _edges(coords)
