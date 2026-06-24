@@ -16,7 +16,7 @@ T1.
 
 Consistency: lateral stiffness is calibrated (lattice strut area -> fiber K0); both carry the same
 distributed self-mass PLUS a top lumped mass P/g (the axial load treated as tributary seismic
-weight); both use 5% Rayleigh damping at modes 1 & 2 and a constant gravity P. The excitation scale
+weight); both use 5% modal damping at modes 1 & 2 and a constant gravity P. The excitation scale
 factor is tuned on the (cheap) fiber column to a target peak roof drift, then the SAME scaled record
 drives the lattice. A period check gates the comparison. Output:
 examples/output/column/column_dynamic_<excitation>.png (roof-drift & base-shear histories + hysteresis).

@@ -15,7 +15,7 @@ from this package (build.py):
   - lattice: the SAME elastic RC lattice (build_lattice_rc, Elastic concrete + rebar), strut area
     calibrated so its K0 (hence T1) matches the elastic fiber column.
 
-Both carry the same distributed self-mass + a top lumped mass P/g, 5% Rayleigh damping at modes 1 & 2,
+Both carry the same distributed self-mass + a top lumped mass P/g, 5% modal damping at modes 1 & 2,
 constant gravity P, and the SAME scaled UniformExcitation in X. The base input is selectable via
 `--excitation` (default `sine`): a harmonic acceleration RESONANT with T1, or the `elcentro` record.
 Because the system is linear, the response scales linearly with intensity, so the scale is set in a

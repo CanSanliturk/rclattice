@@ -338,52 +338,46 @@ def run_pushover_dynamic(
 
 # --- nonlinear seismic time-history (UniformExcitation) ---------------------
 
-def _rayleigh_damping(zeta: float, modes: tuple[int, int]) -> list[float]:
-    """Set Rayleigh damping = `zeta` at the two `modes` (mass + COMMITTED-stiffness proportional).
-
-    Solves a0,a1 from zeta = (a0/2)/w + (a1/2)*w at the two modal frequencies, then
-    ops.rayleigh(a0, 0, 0, a1) — the stiffness term rides the COMMITTED (last-converged) stiffness,
-    the standard nonlinear choice: as the column softens it sheds damping with stiffness, avoiding
-    the spurious damping forces that initial-stiffness Rayleigh (betaKinit) injects once elements
-    yield (those both inflate the base reaction and break Newton). Returns the modal periods so the
-    caller can report/period-check. Run AFTER the domain is built + gravity applied (eigen uses the
-    current tangent)."""
-    i, j = modes
-    lams = ops.eigen(max(i, j))
-    w = [math.sqrt(l) if l > 0 else math.inf for l in lams]
-    wi, wj = w[i - 1], w[j - 1]
-    a0 = 2.0 * zeta * wi * wj / (wi + wj)
-    a1 = 2.0 * zeta / (wi + wj)
-    ops.rayleigh(a0, 0.0, 0.0, a1)
-    return [2.0 * math.pi / wk if wk > 0 else math.inf for wk in w]
-
-
 def _transient_uniform_excitation(*, accel, dt_record: float, scale: float, dof: int,
                                   control_node: int, control_dof: int, base_nodes,
-                                  dt: float, tol: float = 1e-6, max_iter: int = 50) -> dict:
-    """March a UniformExcitation transient on the already-built+massed+gravity-held domain (with
-    Rayleigh already set). The ground-acceleration record `accel` (a sequence at spacing
-    `dt_record`) is applied along `dof`, multiplied by `scale` (fold in g and the intensity scale
-    factor). HHT-alpha (numerical damping); on a non-converged step, retry with finer sub-steps +
-    stronger algorithms. Records relative control displacement (= drift, UniformExcitation is in
-    coords) and base shear `-sum reaction[control_dof]` at every step. Returns time/disp/shear
-    histories + peak |disp|, residual disp, peak |shear|."""
+                                  dt: float, zeta: float = 0.05, modes: tuple[int, int] = (1, 2),
+                                  tol: float = 1e-6, max_iter: int = 50) -> dict:
+    """March a UniformExcitation transient on the already-built+massed+gravity-held domain. Sets
+    `zeta` MODAL damping at the first max(`modes`) modes internally (D33), then applies the
+    ground-acceleration record `accel` (a sequence at spacing `dt_record`) along `dof`, multiplied by
+    `scale` (fold in g and the intensity scale factor). HHT-alpha (numerical damping); on a
+    non-converged step, retry with finer sub-steps + stronger algorithms. Records relative control
+    displacement (= drift, UniformExcitation is in coords) and base shear `-sum reaction[control_dof]`
+    at every step. Returns time/disp/shear histories + peak |disp|, residual disp, peak |shear|, and
+    the modal `periods`."""
     ops.timeSeries("Path", 90, "-dt", dt_record, "-values", *accel, "-factor", scale)
     ops.pattern("UniformExcitation", 90, dof, "-accel", 90)
     # Drop the gravity stage's Static analysis: while it exists OpenSees REFUSES to set a transient
     # integrator ("can't set transient integrator in static analysis") and silently falls back to the
     # default Newmark, so the HHT numerical damping below is ignored. wipeAnalysis clears only the
-    # analysis aggregation (the domain, gravity loadConst, mass, and Rayleigh all persist), so the
+    # analysis aggregation (the domain, gravity loadConst, and mass all persist), so the
     # constraints/numberer/system must be re-declared before the transient integrator is honored.
     ops.wipeAnalysis()
     ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("BandGeneral")
+    # Modal damping (D33): assign `zeta` to the first max(modes) modes, formed from the
+    # mass-orthonormal eigenvectors on the gravity-held tangent. Unlike stiffness-proportional
+    # Rayleigh (a1*K) it has NO term riding the committed tangent, so it does NOT spike the base
+    # reaction when elements crack/yield at high velocity (the D28 artifact). Higher (uncomputed)
+    # modes get no modal damping; the HHT below dissipates that residual high-frequency content.
+    # modalDamping is stored on the domain, so the transient integrator created next uses it.
+    nmode = max(modes)
+    try:
+        lams = ops.eigen(nmode)
+    except Exception:
+        lams = ops.eigen("-fullGenLapack", nmode)
+    ops.modalDamping(zeta)
+    w = [math.sqrt(l) if l > 0 else math.inf for l in lams]
+    periods = [2.0 * math.pi / wk if wk > 0 else math.inf for wk in w]
     ops.test("NormDispIncr", tol, max_iter)
     ops.algorithm("Newton")
     ops.integrator("HHT", 0.7)   # numerical damping (alpha<1): aids convergence + dissipates the
-    ops.analysis("Transient")    # spurious high-frequency reaction spikes at hard-recovered steps
-    #                              (0.7 damps those spikes more aggressively than 0.8, yet is still
-    #                              negligible at the structural period, so the elastic match is
-    #                              unaffected)
+    ops.analysis("Transient")    # high-frequency content modal damping leaves on the uncomputed
+    #                              higher modes (still negligible at the structural period)
 
     def cdisp() -> float:
         return ops.nodeDisp(control_node, control_dof)
@@ -417,7 +411,7 @@ def _transient_uniform_excitation(*, accel, dt_record: float, scale: float, dof:
                 break
         t.append((k + 1) * dt); disp.append(cdisp()); shear.append(base_shear())
     ipk = max(range(len(disp)), key=lambda m: abs(disp[m]))
-    return {"t": t, "disp": disp, "shear": shear, "converged": converged,
+    return {"t": t, "disp": disp, "shear": shear, "converged": converged, "periods": periods,
             "peak_disp": disp[ipk], "peak_time": t[ipk], "residual_disp": disp[-1],
             "peak_shear": max(shear, key=abs), "control_node": control_node,
             "base_nodes": list(base_nodes)}
@@ -431,9 +425,9 @@ def run_dynamic(model: Model, *, accel, dt_record: float, scale: float, control_
 
     Sequence: build → optionally ADD `extra_mass` (dict node_id -> mass, applied to both
     translational DOFs, e.g. tributary axial-load mass at the top) on top of the builder's lumped
-    self-mass → apply gravity (constant, held with loadConst) → Rayleigh (`damping_ratio` at
+    self-mass → apply gravity (constant, held with loadConst) → modal damping (`damping_ratio` at
     `modes`) → UniformExcitation transient of the scaled `accel` record along `control_dof`.
-    Returns the _transient_uniform_excitation dict plus "periods"."""
+    Returns the _transient_uniform_excitation dict (which carries the modal "periods")."""
     if not model.masses and not extra_mass:
         raise ValueError("run_dynamic requires nodal mass on the model")
     ops.wipe()
@@ -454,11 +448,10 @@ def run_dynamic(model: Model, *, accel, dt_record: float, scale: float, control_
                     "control_node": control_node, "base_nodes": base}
         ops.loadConst("-time", 0.0)
 
-    periods = _rayleigh_damping(damping_ratio, modes)
     res = _transient_uniform_excitation(accel=accel, dt_record=dt_record, scale=scale,
                                         dof=control_dof, control_node=control_node,
-                                        control_dof=control_dof, base_nodes=base, dt=dt, tol=tol)
-    res["periods"] = periods
+                                        control_dof=control_dof, base_nodes=base, dt=dt,
+                                        zeta=damping_ratio, modes=modes, tol=tol)
     return res
 
 
@@ -573,8 +566,8 @@ def run_beamcolumn_dynamic(*, height: float, P: float, materials, nelem: int,
     lattice (matched material/mass). The column is SUBDIVIDED into `nelem` equal force-based fiber
     elements (nodes at the same heights as the lattice rows) so `self_mass` distributes by tributary
     length exactly like the lattice's lumped self-mass; `top_mass` (= P/g) is added at the free top.
-    Fixed base, constant axial `P` (held), 5% Rayleigh at `modes`, then UniformExcitation of the
-    scaled `accel` record in X. Returns the _transient_uniform_excitation dict plus "periods"."""
+    Fixed base, constant axial `P` (held), 5% modal damping at `modes`, then UniformExcitation of the
+    scaled `accel` record in X. Returns the _transient_uniform_excitation dict (carrying "periods")."""
     ops.wipe()
     ops.model("basic", "-ndm", 2, "-ndf", 3)
     nnode = nelem + 1
@@ -606,11 +599,9 @@ def run_beamcolumn_dynamic(*, height: float, P: float, materials, nelem: int,
                 "control_node": nnode, "base_nodes": [1]}
     ops.loadConst("-time", 0.0)
 
-    periods = _rayleigh_damping(damping_ratio, modes)
     res = _transient_uniform_excitation(accel=accel, dt_record=dt_record, scale=scale, dof=1,
                                         control_node=nnode, control_dof=1, base_nodes=[1],
-                                        dt=dt, tol=tol)
-    res["periods"] = periods
+                                        dt=dt, zeta=damping_ratio, modes=modes, tol=tol)
     return res
 
 

@@ -1,0 +1,9 @@
+* FORMAT
+    * at least 15 pages long, at most 20 pages (excluding cover page, table of contents, references)
+    * 11/12 font size
+    * double spaced and 2.5 cm margins.
+
+* LAYOUT
+    * Introduction
+    * Main body
+    * Conclusion
