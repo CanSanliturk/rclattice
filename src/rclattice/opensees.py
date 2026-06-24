@@ -643,3 +643,170 @@ def run_benchmark_rc_frame(*, dU: float = 0.1, target: float = 15.0, gravity_P: 
     ops.test("NormDispIncr", 1e-6, 1000); ops.algorithm("Newton")
     ops.analysis("Static")
     return _displacement_pushover(3, 1, [1, 2], dU, target)
+
+
+def _rc_beam_fiber_section(sec_tag: int, *, depth: float, width: float, top_area: float,
+                           bot_area: float, cover: float = 1.5, nbar: int = 3,
+                           core_mat: int = 1, cover_mat: int = 2, steel_mat: int = 3) -> None:
+    """RC beam fiber section: `width` wide (z) x `depth` deep (y), `cover` cover ring, with a
+    confined core (`core_mat`) inside an unconfined cover ring (`cover_mat`) and `nbar` longitudinal
+    bars in a TOP layer (total `top_area`) and a BOTTOM layer (total `bot_area`), both of `steel_mat`.
+
+    Mirrors `_rc_fiber_section` (the column section) but for the thinner beam and a top/bottom bar
+    layout. It REFERENCES materials `core_mat`/`cover_mat`/`steel_mat` (defined by the caller, e.g.
+    via `_rc_fiber_section` on the column section) — it does NOT redefine them, so a frame can share
+    one Concrete02 core / cover / Steel02 trio between its columns and its beam (the lattice does the
+    same via the grade -> material mapping)."""
+    y1, z1 = depth / 2.0, width / 2.0
+    ops.section("Fiber", sec_tag)
+    ops.patch("quad", core_mat, 1, 10, -y1 + cover, z1 - cover, -y1 + cover, -z1 + cover,
+              y1 - cover, -z1 + cover, y1 - cover, z1 - cover)                 # core
+    ops.patch("quad", cover_mat, 1, 1, -y1, z1, -y1, -z1, -y1 + cover, -z1 + cover, -y1 + cover, z1 - cover)
+    ops.patch("quad", cover_mat, 1, 1, y1 - cover, z1 - cover, y1 - cover, -z1 + cover, y1, -z1, y1, z1)
+    ops.patch("quad", cover_mat, 1, 1, -y1 + cover, z1 - cover, -y1 + cover, z1, y1 - cover, z1, y1 - cover, z1 - cover)
+    ops.patch("quad", cover_mat, 1, 1, -y1 + cover, -z1, -y1 + cover, -z1 + cover, y1 - cover, -z1 + cover, y1 - cover, -z1)
+    ops.layer("straight", steel_mat, nbar, top_area / nbar, y1 - cover, z1 - cover, y1 - cover, -z1 + cover)  # top
+    ops.layer("straight", steel_mat, nbar, bot_area / nbar, -y1 + cover, z1 - cover, -y1 + cover, -z1 + cover)  # bottom
+
+
+def _beam_section(sec_tag: int, *, depth: float, width: float, top_area: float, bot_area: float,
+                  beam_materials=None) -> None:
+    """Emit the beam fiber section. By default the beam concrete REUSES the column section's
+    core/cover materials (tags 1/2); pass `beam_materials` (a (core, cover) `UniaxialMaterial` pair,
+    e.g. Elastic) to give the beam its OWN concrete law (emitted as tags 4/5) while keeping the
+    shared Steel02 (tag 3) — used to model the thin beam elastically (the stable default) without
+    touching the columns."""
+    if beam_materials is None:
+        _rc_beam_fiber_section(sec_tag, depth=depth, width=width, top_area=top_area, bot_area=bot_area)
+        return
+    bcore, bcover = beam_materials
+    ops.uniaxialMaterial(bcore.mtype, 4, *bcore.args)
+    ops.uniaxialMaterial(bcover.mtype, 5, *bcover.args)
+    _rc_beam_fiber_section(sec_tag, depth=depth, width=width, top_area=top_area, bot_area=bot_area,
+                           core_mat=4, cover_mat=5, steel_mat=3)
+
+
+def run_beamcolumn_frame(*, height: float = 144.0, span: float = 144.0, beam_depth: float = 18.0,
+                         beam_width: float = 15.0, P: float = 180.0, dU: float = 0.1,
+                         target: float = 15.0, materials=None, beam_materials=None,
+                         beam_top_area: float = 1.8, beam_bot_area: float = 1.8) -> dict:
+    """Fiber `forceBeamColumn` portal-frame pushover — the 1D verification reference for the RC
+    lattice frame (the frame analog of `run_beamcolumn_cantilever`). One bay, one storey:
+    two RC fiber columns (the 15x24 section, `_rc_fiber_section`, P-Delta) and a thinner RC fiber
+    beam (`beam_width` x `beam_depth`, top+bottom bars) sharing the SAME Concrete02 core/cover +
+    Steel02 trio (`materials`, exactly as the lattice/continuum share grades). `beam_materials`
+    (optional (core, cover) pair) gives the beam its own concrete law (e.g. Elastic, the stable
+    default) while keeping the shared steel. Fixed bases, constant gravity `P` at each column top,
+    then a DisplacementControl lateral pushover of the top-left joint. Returns the pushover curve
+    {"disp", "shear", "converged"} (shear = base reaction sum)."""
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    ops.node(1, 0.0, 0.0); ops.node(2, span, 0.0)            # bases
+    ops.node(3, 0.0, height); ops.node(4, span, height)      # beam-column joints
+    ops.fix(1, 1, 1, 1); ops.fix(2, 1, 1, 1)
+
+    _rc_fiber_section(1, materials=materials)                 # column section (defines mats 1/2/3)
+    _beam_section(2, depth=beam_depth, width=beam_width, top_area=beam_top_area,
+                  bot_area=beam_bot_area, beam_materials=beam_materials)      # beam section
+    ops.geomTransf("PDelta", 1)                               # columns (P-Delta under gravity)
+    ops.geomTransf("Linear", 2)                               # beam
+    ops.beamIntegration("Lobatto", 1, 1, 5)
+    ops.beamIntegration("Lobatto", 2, 2, 5)
+    ops.element("forceBeamColumn", 1, 1, 3, 1, 1)            # left column
+    ops.element("forceBeamColumn", 2, 2, 4, 1, 1)            # right column
+    ops.element("forceBeamColumn", 3, 3, 4, 2, 2)            # beam
+
+    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+    ops.load(3, 0.0, -P, 0.0); ops.load(4, 0.0, -P, 0.0)     # gravity at the column tops
+    ops.system("BandGeneral"); ops.numberer("RCM"); ops.constraints("Transformation")
+    ops.test("NormDispIncr", 1e-8, 100); ops.algorithm("Newton")
+    ops.integrator("LoadControl", 0.1); ops.analysis("Static")
+    if ops.analyze(10) != 0:
+        return {"converged": False, "disp": [], "shear": [], "stage": "gravity"}
+    ops.loadConst("-time", 0.0)
+
+    ops.timeSeries("Linear", 2); ops.pattern("Plain", 2, 2)
+    ops.load(3, 1.0, 0.0, 0.0); ops.load(4, 1.0, 0.0, 0.0)   # lateral reference pattern (+X)
+    ops.test("NormDispIncr", 1e-6, 1000); ops.algorithm("Newton")
+    ops.analysis("Static")
+    return _displacement_pushover(3, 1, [1, 2], dU, target)
+
+
+def run_beamcolumn_frame_dynamic(*, height: float, span: float, beam_depth: float, beam_width: float,
+                                 P: float, materials, ncol: int, nbeam: int, self_mass_col: float,
+                                 self_mass_beam: float, top_mass: float, accel, dt_record: float,
+                                 scale: float, beam_materials=None, beam_top_area: float = 1.8,
+                                 beam_bot_area: float = 1.8, damping_ratio: float = 0.05,
+                                 modes: tuple[int, int] = (1, 2), dt: float = 0.01,
+                                 tol: float = 1e-6) -> dict:
+    """Nonlinear seismic time-history of the fiber `forceBeamColumn` portal frame — the dynamic
+    reference for the lattice frame (the frame analog of `run_beamcolumn_dynamic`). Each column is
+    SUBDIVIDED into `ncol` force-based fiber elements and the beam into `nbeam`, so `self_mass_col`
+    (per column) and `self_mass_beam` distribute by tributary length like the lattice's lumped
+    self-mass; the axial-load tributary mass `top_mass` (= P/g, per column) is lumped at each
+    beam-column joint. `beam_materials` (optional (core, cover) pair) gives the beam its own concrete
+    law (e.g. Elastic) while keeping the shared steel. Fixed bases, constant gravity `P` per column
+    (held), 5% modal damping at `modes`, then a UniformExcitation of the scaled `accel` record in X.
+    Returns the `_transient_uniform_excitation` dict (carrying the modal "periods")."""
+    from collections import defaultdict
+
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    col_seg, beam_seg = height / ncol, span / nbeam
+
+    for i in range(ncol + 1):                                 # left column nodes 1 .. ncol+1
+        ops.node(1 + i, 0.0, col_seg * i)
+    joint_L = ncol + 1
+    rbase = ncol + 2
+    for i in range(ncol + 1):                                 # right column nodes rbase .. rbase+ncol
+        ops.node(rbase + i, span, col_seg * i)
+    joint_R = rbase + ncol
+    beam_nodes = [joint_L]                                    # beam: joint_L, interior, joint_R
+    nid = joint_R + 1
+    for k in range(1, nbeam):
+        ops.node(nid, beam_seg * k, height)
+        beam_nodes.append(nid)
+        nid += 1
+    beam_nodes.append(joint_R)
+    ops.fix(1, 1, 1, 1); ops.fix(rbase, 1, 1, 1)
+
+    # accumulate nodal mass (a joint receives column + beam tributary + the axial top mass), emit once
+    m: dict[int, float] = defaultdict(float)
+    for col_base in (1, rbase):
+        for i in range(ncol + 1):
+            trib = col_seg if 0 < i < ncol else col_seg / 2.0
+            m[col_base + i] += self_mass_col * trib / height
+    for idx, n in enumerate(beam_nodes):
+        trib = beam_seg if 0 < idx < len(beam_nodes) - 1 else beam_seg / 2.0
+        m[n] += self_mass_beam * trib / span
+    m[joint_L] += top_mass; m[joint_R] += top_mass
+    for n, mv in m.items():
+        ops.mass(n, mv, mv, 0.0)                              # translational only (no rotary inertia)
+
+    _rc_fiber_section(1, materials=materials)
+    _beam_section(2, depth=beam_depth, width=beam_width, top_area=beam_top_area,
+                  bot_area=beam_bot_area, beam_materials=beam_materials)
+    ops.geomTransf("PDelta", 1); ops.geomTransf("Linear", 2)
+    ops.beamIntegration("Lobatto", 1, 1, 5); ops.beamIntegration("Lobatto", 2, 2, 5)
+    eid = 1
+    for col_base in (1, rbase):                               # force-based columns (subdivided)
+        for i in range(ncol):
+            ops.element("forceBeamColumn", eid, col_base + i, col_base + i + 1, 1, 1)
+            eid += 1
+    for a, b in zip(beam_nodes, beam_nodes[1:]):             # force-based beam (subdivided)
+        ops.element("forceBeamColumn", eid, a, b, 2, 2)
+        eid += 1
+
+    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+    ops.load(joint_L, 0.0, -P, 0.0); ops.load(joint_R, 0.0, -P, 0.0)
+    ops.system("BandGeneral"); ops.numberer("RCM"); ops.constraints("Transformation")
+    ops.test("NormDispIncr", 1e-8, 100); ops.algorithm("Newton")
+    ops.integrator("LoadControl", 0.1); ops.analysis("Static")
+    if ops.analyze(10) != 0:
+        return {"converged": False, "stage": "gravity", "t": [], "disp": [], "shear": [],
+                "control_node": joint_L, "base_nodes": [1, rbase]}
+    ops.loadConst("-time", 0.0)
+
+    return _transient_uniform_excitation(accel=accel, dt_record=dt_record, scale=scale, dof=1,
+                                         control_node=joint_L, control_dof=1, base_nodes=[1, rbase],
+                                         dt=dt, zeta=damping_ratio, modes=modes, tol=tol)

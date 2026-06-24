@@ -534,3 +534,49 @@ Entry format:
 - **Status:** accepted. Additive only — `kind`/`role` carry defaults and do not change the FE assembly
   numerically (test suite numerically unchanged: 25 pass + the same one pre-existing nonlinear-pushover
   failure from the in-progress materials WIP). Verified end-to-end on `column/pushover_linear.py --draw`.
+
+### D34 — 2026-06-24 — Frame examples rebuilt as the cantilever column + a thinner beam; full column-package mirror
+- **Context (user request):** make the frame examples mirror the column package (D26/D27 structure) —
+  "whatever we have for the cantilever column, the portal frame should have too" — and **constitute the
+  frame from the cantilever column** (`examples/column`) plus a **thinner connecting beam** that uses
+  the **same concrete grades and steel grade**. Supersedes the D27 frame example file set.
+- **Geometry / reinforcement (user, AskUserQuestion):** one-bay one-storey portal frame, kip-in.
+  Columns = the EXACT cantilever column (24-deep × 144-tall, THK 15, confined CORE + unconfined
+  COVER_C Concrete02, 3+2+3 Steel02 longitudinal + horizontal stirrups). Beam = thinner **18-in**
+  deep × 15 wide, **span 144 in** (centerline-to-centerline), SAME CORE/COVER + STEEL grades;
+  **top+bottom 1.8 in² longitudinal layers + vertical stirrup ties** along the clear span. Fixed bases,
+  gravity P=180 kip/column at the joints, lateral pattern over the beam level.
+- **Mirror (scope = full mirror + replace old):** `examples/frame/` now holds `specimen.py` (shared),
+  `build.py` (references {beamcolumn fiber frame, 2D continuum frame} + scalar/2-group calibration +
+  lattice + linear variants), `excitation.py` (self-contained copy of the column's), and the four entry
+  scripts `pushover.py` / `pushover_linear.py` / `dynamic.py` / `dynamic_linear.py` (selectable
+  `--reference` exactly like the column). The old Stage-1 `pushover.py` and Stage-2 `pushover_rc.py`
+  were removed; the separate SI modal `visualize.py` is kept as-is.
+- **New backend (`opensees.py`, the only `ops.*` module):** `_rc_beam_fiber_section` + `_beam_section`,
+  `run_beamcolumn_frame` (pushover) and `run_beamcolumn_frame_dynamic` (members subdivided so self-mass
+  distributes like the lattice) — the fiber `forceBeamColumn` portal-frame reference (the frame analog
+  of `run_beamcolumn_cantilever` / `_dynamic`). The columns reuse the 15×24 `_rc_fiber_section`; the
+  beam gets a 15×18 top/bottom-bar fiber section sharing the same core/cover/steel materials. (The old
+  hard-coded `run_benchmark_rc_frame` is left in place but is now unused by the examples.)
+- **Beam concrete model (user, AskUserQuestion) — the key fork:** the thin **nonlinear** beam softens
+  into a **local lattice mechanism the static Newton pushover cannot trace** (dies ~0.2 in / ~50 kip
+  regardless of grade ductility CORE-vs-COVER or `horizon` — the SAME phenomenon as the pre-existing
+  failing `test_nonlinear_pushover_runs_and_yields`). The **dynamic** transient is fine with the fully
+  nonlinear beam (inertia + HHT regularize the softening — verified it rides past the static death
+  point). Decision: **DEFAULT = elastic beam concrete** (columns + ALL rebar nonlinear; beam concrete
+  linear-elastic at the same grade E), with an **opt-in `--nonlinear-beam`** for the SAME Concrete02
+  beam, in **BOTH pushover and dynamic**. Threaded via distinct beam zones (`zone_of` → "beam_core" /
+  "beam_cover") into `make_material_for` (lattice) and `_beam_fiber_materials` (fiber reference, emitted
+  as separate mat tags 4/5 keeping shared Steel02). The 2D **continuum** reference keeps the beam
+  nonlinear always (the plane-stress quads are stable). The default elastic beam matches the project's
+  prior frame precedent (D19 fork-2) and the OpenSees RCFrame benchmark.
+- **Results (kip, in; default elastic beam, scalar calibration to the fiber frame):** `pushover_linear`
+  K0 match −0.03% (lattice 301.16 vs fiber 301.26 kip/in). `pushover` (nonlinear columns, elastic beam)
+  lattice peak V **133.4 vs fiber-frame 131.8 kip (~1.2%)**, lattice `conv=False` past its limit point
+  at 0.79 in (column-base sway mechanism, same conv-past-limit behaviour as the column lattice).
+  `dynamic_linear` (resonant sine) T1 0.359 vs 0.353 s, peak drift 1.03 vs 1.00 in, peak V 297 vs
+  302 kip (~1.6%), both `conv=True`. Nonlinear `dynamic` runs and converges with both the default
+  elastic beam and `--nonlinear-beam` (transient is stable either way).
+- **Status:** accepted. Test suite unchanged (25 pass + the same one pre-existing nonlinear-pushover
+  failure, which is itself this thin-nonlinear-beam-frame instability). Supersedes the frame file set
+  in D27 (left as the historical record).
