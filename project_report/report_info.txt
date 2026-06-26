@@ -4,6 +4,52 @@
     * double spaced and 2.5 cm margins.
 
 * LAYOUT
-    * Introduction
-    * Main body
-    * Conclusion
+    * Introduction (2 pages)
+        * Why lattice modelling matters
+        * Dynamic behavior of shearwalls
+        * Aim of the current study
+    * Main body (10-15 pages)
+        * Physical columns to be modelled (1 page)
+        * Opensees as analysis engine
+        * Modelling techniques (6 pages)
+            * Lattice members and materials (3 pages)
+                * Calibration of lattice members and materials
+            * Force based beam column verification model and materials (1 page)
+            * Continuum verification model and materials (2 pages)
+        * Different analysis types and analysis results (6 pages)
+            * Pushover (2 pages)
+                * linear elastic
+                * Plastic Pushover
+            * Dynamics (4 pages)
+                * Linear
+                    * sinusoidal loading
+                    * elcentro loading
+                * Nonlinear
+                    * sinusoidal loading
+                    * elcentro loading
+    * Conclusion (3 pages)
+        * Comment on lattice models accuracy
+        * Future work
+            * For column, extend the 2d model to 3d for the modelled column
+            * Then, switch to shearwalls
+
+* LECTURERS NOTE
+
+You are expected to be either on your own or form at most 2-3 student groups to investigate a topic
+of interest related to nonlinear analysis of structures by using material, geometric nonlinearity or
+any form of nonlinearity. You can work on frame, shell or solid finite elements, simulation of RC
+or steel structures, aerospace structures, etc... Your research can be theoretical, coding, etc... or
+using and describing the advanced nonlinear solution capabilities of available software programs.
+You are expected to write a report and submit all the files that you used in the preparation of your
+project report.
+Write a report that is at least 15 pages long (for single student groups) with 11/12 font size, double
+spaced and 2.5 cm margins. If your group contains 2-3 students, then your report should be at least
+5 pages more for each additional student. The amount of work should actually theoretically double
+with the addition of each student in the group, which should be reflected in increased content
+quality.
+Your report should have a cover page, table of contents, list of figures and/or tables page, list of
+references (not counted in 15 or so pages). Don't exaggerate the size of figures, i.e. the figures
+should not cover huge part of the project report.
+When you write your report, have an introduction part that summarizes your project topic in
+general and then progress with your report's written part. At the end, write a summary and
+conclusion part, and possibly some suggestions and recommendations if applicable.

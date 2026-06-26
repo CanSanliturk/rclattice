@@ -1,8 +1,10 @@
 """Material mapping layer (D15): physical grade -> per-builder OpenSees material.
 
-This is also where lattice calibration will eventually live (e.g. fracture-energy
-regularization of strut softening). For now only the elastic mappings are implemented;
-the nonlinear bundle (Concrete02 / ASDConcrete3D / Steel02) will be added here.
+This is also where lattice calibration lives (fracture-energy / crack-band regularization of
+strut softening by strut length, D20). Both the elastic mappings and the nonlinear bundle are
+implemented here: Concrete02 for uniaxial struts/fibers (plain and length-regularized),
+ASDConcrete3D + PlaneStress for the nD continuum (D29/D30), and Steel02 for rebar (plus Elastic
+variants for the linear-material studies).
 """
 
 from __future__ import annotations

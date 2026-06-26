@@ -15,6 +15,9 @@ build/
 venv/
 env/
 
+# Project report directory
+project_report/
+
 # Testing
 .pytest_cache/
 .coverage

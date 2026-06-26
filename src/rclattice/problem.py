@@ -4,8 +4,8 @@ A `Problem` describes a specimen ONCE — geometry, materials (physical grades),
 loads — independently of how it will be discretised. Builders (lattice / continuum /
 beam-column) translate the same Problem into an OpenSees FE Model.
 
-Reinforcement (free 3D curves, D13) is not part of this first elastic-verification slice and
-will be added here later.
+Reinforcement is defined here as `Rebar` polylines (path + cross-section area + steel grade,
+D13); builders consume them as steel struts on shared lattice/continuum nodes (perfect bond, D5).
 """
 
 from __future__ import annotations

@@ -580,3 +580,66 @@ Entry format:
 - **Status:** accepted. Test suite unchanged (25 pass + the same one pre-existing nonlinear-pushover
   failure, which is itself this thin-nonlinear-beam-frame instability). Supersedes the frame file set
   in D27 (left as the historical record).
+
+---
+
+## Reconstructed entries (logged 2026-06-26 during a docs↔code audit)
+
+These decisions are **referenced in the source code** (and were implemented) but had **no entry in
+this log**. They are reconstructed from the code and its comments; the *rationale* below is inferred,
+so **confirm/correct** it. (Also: **D21 is referenced nowhere** in the code or docs — either an
+unlogged decision or a skipped number; please confirm.)
+
+### D22 — ~2026-06-17 — Keep the lattice convergent past the limit point: `corotTruss` + residual compression plateau + dynamic-relaxation pushover *(reconstructed)*
+- **Decision:** three coupled measures so the RC lattice can be pushed well past first yield without
+  the axial-truss mechanism terminating the run (the D4 caveat; the D20 length-regularization alone
+  was not enough):
+  1. struts use **`corotTruss`** (not `Truss`) so geometry/P-Δ is carried consistently at large drift
+     (the P-Δ effect the beam-column reference shows). `build_lattice_rc(strut_element=...)`, set to
+     `"corotTruss"` by the column/frame builders.
+  2. a **residual compression plateau**: `concrete_uniaxial_regularized(residual_ratio=0.2)` floors
+     `fpcu` at `residual_ratio*fc`, so a crushed strut holds a positive flat residual instead of
+     dropping to zero tangent — removing the local zero-stiffness mechanism that otherwise ends the
+     pushover just past yield (`materials.py`).
+  3. **`run_pushover_dynamic`** (user-selected): a quasi-static *transient* (Newmark + heavy Rayleigh,
+     imposed ramp on the drive nodes) that rides through limit points / local snap-backs the static
+     Newton can't (`opensees.py`).
+- **Why (inferred):** sustaining post-yield *drift* (not strength) was the binding problem; these
+  three address geometry, the crushed-strut zero-tangent, and solver robustness respectively.
+- **Status:** accepted (reconstructed). `corotTruss` + the residual plateau are the defaults; the
+  dynamic-relaxation pushover is an opt-in runner.
+
+### D23 — ~2026-06-17 — Confinement: confined-core vs unconfined-cover grades + transverse stirrup/tie struts *(reconstructed)*
+- **Decision:** model transverse confinement explicitly in the RC specimens (column and frame):
+  - two concrete grades — a **confined `CORE`** (high crushing strain `epsU` + residual `fcu`,
+    Mander-style) inside an **unconfined `COVER`** (no residual) — selected per `zone_of(x,y)`;
+  - **transverse stirrup/tie steel struts** (`STIRRUP_AREA`, one horizontal tie per mesh row across
+    the core), `role="stirrup"`, giving the lattice a **non-softening lateral/shear path** so the
+    confined core does not disintegrate into a local mechanism past yield.
+  (`examples/column/specimen.py`, `examples/frame/specimen.py`.)
+- **Why (inferred):** the unconfined softening law alone lets the core crush into a mechanism; the
+  ties + ductile core grade reproduce confinement so the lattice sustains post-yield drift. The 2D
+  continuum reference omits stirrups (it supplies that lateral path itself — D29).
+- **Status:** accepted (reconstructed).
+
+### D31 — ~2026-06-21 — `horizon` is a tunable knob for redundant bracing against the post-peak mechanism *(reconstructed)*
+- **Decision:** expose the strut-connectivity **`horizon`** (D9) as a study parameter (CLI `--horizon`,
+  default unchanged at **1.5**). A larger horizon connects each node to more neighbours → more
+  redundant triangulation/bracing, which helps the lattice resist forming the post-peak local
+  mechanism. Threaded through `calibrate_area` / `rc_lattice` / `build_lattice_rc`.
+- **Why (inferred):** a tuning lever, complementary to D22, for the same post-yield-stability problem;
+  kept at 1.5 by default so existing results are unchanged.
+- **Status:** accepted (reconstructed).
+
+### D33 — ~2026-06-23 — Transient runners use modal damping (replacing stiffness-proportional Rayleigh); resolves the D28 base-shear spike *(reconstructed)*
+- **Decision:** `_transient_uniform_excitation` (and the `single_beamcolumn` run) now assign **modal
+  damping** (`ops.modalDamping(zeta)` over the first `max(modes)` mass-orthonormal eigenvectors on the
+  gravity-held tangent) instead of stiffness-proportional Rayleigh. HHT-α still dissipates the
+  uncomputed higher-mode content.
+- **Why:** stiffness-proportional Rayleigh (`a1·K_committed·v`) **spiked the base reaction** whenever
+  fiber/strut integration points cracked or yielded at high velocity — the **D28 known-open**
+  base-shear-spike artifact (fiber column ~636 kip vs lattice ~37 kip). Modal damping has no term
+  riding the committed tangent, so the spike disappears and lattice↔reference base-shear histories
+  become comparable. **This resolves the mechanical decision D28 left open.**
+- **Status:** accepted (reconstructed). Supersedes the Rayleigh damping noted in D24/D28 (those
+  entries left as the historical record).

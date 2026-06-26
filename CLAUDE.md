@@ -7,8 +7,10 @@ Guidance for working in this repository.
 > entry whenever a significant decision is made or reversed** (never rewrite history —
 > supersede instead).
 >
-> **Next planned work:** implementing the RC frame pushover benchmark with lattices — full
-> handoff spec in [TASK_RC_FRAME_PUSHOVER.md](TASK_RC_FRAME_PUSHOVER.md) (decision D18, pending).
+> **Project state:** the RC **column** and **portal-frame** studies are implemented — pushover +
+> dynamic, nonlinear + linear, lattice vs fiber-`forceBeamColumn` / 2D-continuum references (see the
+> **Status** section below and DECISIONS.md through D34). The original RC-frame pushover benchmark
+> (D18) is implemented — see D18/D19 and the D34 frame rebuild.
 
 ## Project
 
@@ -112,22 +114,26 @@ level above it (D11).
     pyproject.toml, uv.lock, requirements.txt, .venv/
     rclattice/                    # the package (flat layout, hatchling, editable install)
       __init__.py
-      problem.py                  # backend-agnostic Problem (geometry, grades, BCs, loads)
-      materials.py                # grade -> per-builder OpenSees material mapping (D15)
+      problem.py                  # backend-agnostic Problem (geometry, grades, Rebar, BCs, loads)
+      materials.py                # grade -> OpenSees materials: Elastic / Concrete02(+regularized) / ASDConcrete3D / Steel02 (D15/D20/D29)
+      reinforcement.py            # map a Rebar polyline onto the lattice node chain (D13)
       mesh.py                     # gmsh grid (nodes + quads) + horizon strut connectivity
-      builders.py                 # build_lattice / build_continuum -> FE Model + lumped mass (D12/D16)
+      builders.py                 # build_lattice[_rc] / build_continuum[_rc] -> FE Model + lumped mass (D12/D16/D29)
       calibration.py              # lattice area calibration: static + modal periods (D16, scipy)
-      viz.py                      # matplotlib visualizer (Agg): deformed lattice/continuum, modes (D17)
-      model.py                    # generic FE Model (Node/Element/Uniaxial+NDMaterial/mass/...)
-      opensees.py                 # ONLY module that imports openseespy: run_static + run_modal
-    tests/                        # pytest (test_horizon, test_verification)
-    examples/                     # cantilever_hello.py, cantilever_verify.py
+      viz.py                      # matplotlib (Agg): deformed shapes, modes, pushover, time-history, --draw models (D17/D32)
+      model.py                    # generic FE Model (Node/Element[+kind]/Uniaxial+NDMaterial/mass/...)
+      opensees.py                 # ONLY module importing openseespy: static/modal/gravity/pushover/dynamic + fiber beam-column refs
+    tests/                        # pytest (horizon, verification, calibration, rc, pushover, frame, continuum_rc)
+    examples/
+      column/                     # RC cantilever-column studies (pushover/dynamic, nonlinear/linear, single-element BC)
+      frame/                      # portal-frame studies (column + thinner beam; pushover/dynamic +/- linear; SI modal visualize)
 ```
 
-Working today: the shared `Problem` + material mapping + `build_lattice`/`build_continuum`
-(2D plane-stress quads) + a linear-static runner, with an elastic lattice-vs-continuum
-verification. `model.py` is now a GENERIC FE assembly (Element with `etype`/`nodes`/`args`),
-not truss-specific. Target structure to grow into incrementally (D12):
+Working today: the shared `Problem` + material mapping (elastic + nonlinear) + builders
+(`build_lattice[_rc]`, `build_continuum[_rc]`, 2D plane-stress) + static/modal/gravity/pushover/
+dynamic runners, with the elastic lattice-vs-continuum verification and the nonlinear RC
+column/frame studies (see Status). `model.py` is a GENERIC FE assembly (Element with
+`etype`/`nodes`/`args`/`kind`), not truss-specific. Target structure to grow into incrementally (D12):
 
 ```
 rclattice/
@@ -164,7 +170,7 @@ rclattice/
 cd src
 uv sync                        # creates .venv + editable-installs rclattice
 source .venv/bin/activate
-uv run python examples/cantilever_hello.py     # hello-world vertical slice
+uv run python examples/column/pushover_linear.py   # vertical slice (linear RC column)
 uv run --with pytest pytest tests/             # tests
 ```
 
@@ -194,32 +200,32 @@ python -c "import openseespy.opensees as ops; ops.wipe(); print('OpenSees OK')"
 
 ## Status
 
-Early scaffolding, built incrementally. Working so far:
-- Generic FE `model.py`, gmsh `mesh.py` (nodes + quads + horizon struts), linear-static
-  `opensees.py`.
-- Shared `Problem` (`problem.py`) + grade->material mapping (`materials.py`) + `builders.py`
-  (`build_lattice`, `build_continuum` 2D plane-stress/strain).
-- [cantilever_hello.py](src/examples/cantilever_hello.py): lattice cantilever (33 nodes, 92
-  struts, tip ~ -5.2 mm at A=1e-3).
-- [cantilever_verify.py](src/examples/cantilever_verify.py): elastic lattice-vs-continuum on
-  one Problem; single-scalar strut-area calibration matches the continuum tip deflection.
+Built incrementally; the elastic verification slice and the nonlinear RC studies work.
+- Generic FE `model.py`, gmsh `mesh.py` (nodes + quads + horizon struts), backend `opensees.py`
+  (the only `ops.*` module: static / modal / gravity / pushover / dynamic + fiber beam-column refs).
+- Shared `Problem` (`problem.py`, incl. `Rebar`) + grade->material mapping (`materials.py`:
+  Elastic, Concrete02 plain + length-regularized D20, ASDConcrete3D+PlaneStress D29/D30, Steel02)
+  + builders (`build_lattice[_rc]`, `build_continuum[_rc]`, 2D plane-stress/strain).
 - Modal calibration (D16): density-based lumped tributary mass, `run_modal` (ops.eigen), and
   `calibration.py` fitting orthogonal/diagonal strut areas (bounded, scipy least_squares) to
-  the static deflection + first N periods. [cantilever_calibrate.py](src/examples/cantilever_calibrate.py).
+  the static deflection + first N periods.
 - Frame + visualizer (D17): compound-rectangle geometry (`portal_frame`, joints merged) and
   box-based supports/loads (`BoxSupport`/`BoxLoad`); matplotlib `viz.py` renders deformed
   lattice/continuum side-by-side for static + mode shapes + an animated GIF.
   [frame/visualize.py](src/examples/frame/visualize.py) — frame periods agree ~1-3%
   lattice-vs-continuum.
-- RC frame pushover, Stage 1 (D18/D19, ELASTIC pipeline): `opensees.run_gravity` (LoadControl)
-  and `opensees.run_pushover` (gravity-constant → DisplacementControl, base shear = sum of base
-  reactions, step-halving fallback); `builders.select_nodes` (post-build box node query);
-  `viz.figure_pushover` (base-shear-vs-drift plot). [frame/pushover.py](src/examples/frame/pushover.py):
-  benchmark frame in kip-in, lattice strut area calibrated to the continuum lateral stiffness
-  (match ~271 kip/in, both converge to 15 in). 13 tests in [src/tests/](src/tests/), all passing.
+- Pushover machinery (D18/D19): `opensees.run_gravity` (LoadControl) and `opensees.run_pushover`
+  (gravity-constant → DisplacementControl, base shear = base-reaction sum, step-halving fallback);
+  `builders.select_nodes` (post-build box node query); `viz.figure_pushover`. Large-drift extras:
+  `corotTruss` struts + a residual compression plateau + `run_pushover_dynamic` (dynamic relaxation,
+  D22). Transient `run_dynamic` (UniformExcitation) uses **modal damping** (D33, replacing
+  stiffness-proportional Rayleigh — fixes the D28 base-shear spike).
 
-- RC column studies (D19–D29, `examples/column/`): nonlinear RC lattice pushover + dynamic, with
-  linear-material siblings, all calibrated to a reference. Materials done: uniaxial Concrete02
+- RC column studies (D19–D33, `examples/column/`): nonlinear RC lattice pushover + dynamic, with
+  linear-material siblings, all calibrated to a reference. Confined-core vs cover grades + stirrup
+  ties (D23); strut connectivity tunable via `--horizon` (D31); opt-in `--draw` analysis-model
+  figures with reinforcement styled by kind (D32); a `single_beamcolumn.py` single-element fiber-BC
+  reference variant. Materials done: uniaxial Concrete02
   (length-regularized struts, D20), Steel02 rebar, and nD **ASDConcrete3D + PlaneStress** for the
   continuum (D29). Reinforcement done: `Rebar` struts on shared nodes (D13). Column pushover compares
   the lattice to a **selectable reference** — `--reference {beamcolumn,continuum}` (D29 pushover, D30
@@ -230,5 +236,15 @@ Early scaffolding, built incrementally. Working so far:
   hysteresis (coupon-verified); seismic histories track closely, loop *shapes* differ slightly (the
   irreducible damage-vs-Concrete02 difference). Continuum dynamic is sine-only (heavy ~1.5 s/step).
 
-Not yet: gmsh `embed` discrete bars in the continuum; 3D solids, shells, BeamColumnBuilder; a dedicated
-results layer.
+- RC frame (D34, `examples/frame/`): the portal frame rebuilt as the cantilever column + a thinner
+  (18-in) beam sharing the same grades — a full column-package mirror (pushover/dynamic,
+  nonlinear/linear, selectable `--reference`). Beam concrete defaults **elastic** (the thin nonlinear
+  beam forms a local mechanism the static pushover can't trace), opt-in `--nonlinear-beam`;
+  `visualize.py` keeps the separate SI modal lattice-vs-continuum study.
+
+Tests: `src/tests/` (horizon, verification, calibration, rc, pushover, frame, continuum_rc) — 25 pass
+and one known-failing (`test_rc.py::test_nonlinear_pushover_runs_and_yields`, the thin-nonlinear-beam
+lattice instability, D34).
+
+Not yet: gmsh `embed` discrete bars in the continuum; 3D solids, shells, a packaged BeamColumnBuilder
+(fiber refs live as `run_beamcolumn_*` in `opensees.py`); a dedicated results layer.
