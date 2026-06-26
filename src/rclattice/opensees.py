@@ -557,82 +557,66 @@ def run_beamcolumn_cantilever(*, height: float = 144.0, P: float = 180.0,
     return _displacement_pushover(2, 1, [1], dU, target)
 
 
-def run_beamcolumn_dynamic(*, height: float, P: float, materials, nelem: int,
+def run_beamcolumn_dynamic(*, height: float, P: float, materials,
                            self_mass: float, top_mass: float, accel, dt_record: float,
                            scale: float, damping_ratio: float = 0.05,
                            modes: tuple[int, int] = (1, 2), dt: float = 0.01,
                            tol: float = 1e-6) -> dict:
     """Nonlinear seismic time-history of the fiber `forceBeamColumn` column — the reference for the
-    lattice (matched material/mass). The column is SUBDIVIDED into `nelem` equal force-based fiber
-    elements (nodes at the same heights as the lattice rows) so `self_mass` distributes by tributary
-    length exactly like the lattice's lumped self-mass; `top_mass` (= P/g) is added at the free top.
-    Fixed base, constant axial `P` (held), 5% modal damping at `modes`, then UniformExcitation of the
+    lattice (matched material/mass). The column is a SINGLE force-based fiber element (fixed base
+    node 1, free top node 2, 5 Lobatto points), matching the single-element pushover reference
+    (`run_beamcolumn_cantilever`) and `single_beamcolumn.py`. `self_mass` is carried as DISTRIBUTED
+    element mass (`-mass self_mass/height`) and `top_mass` (= P/g) is lumped at the free top. Fixed
+    base, constant axial `P` (held), 5% modal damping at `modes`, then UniformExcitation of the
     scaled `accel` record in X. Returns the _transient_uniform_excitation dict (carrying "periods")."""
     ops.wipe()
     ops.model("basic", "-ndm", 2, "-ndf", 3)
-    nnode = nelem + 1
-    seg = height / nelem
-    for i in range(1, nnode + 1):
-        ops.node(i, 0.0, seg * (i - 1))
+    ops.node(1, 0.0, 0.0); ops.node(2, 0.0, height)
     ops.fix(1, 1, 1, 1)
-    for i in range(1, nnode + 1):
-        trib = seg if 1 < i < nnode else seg / 2.0          # half-tributary at the ends
-        m = self_mass * trib / height + (top_mass if i == nnode else 0.0)
-        ops.mass(i, m, m, 0.0)                               # translational only (no rotary inertia)
+    ops.mass(2, top_mass, top_mass, 0.0)                     # axial-load tributary seismic mass (top)
 
     _rc_fiber_section(1, materials=materials)
     ops.geomTransf("PDelta", 1)
     ops.beamIntegration("Lobatto", 1, 1, 5)
-    for e in range(1, nelem + 1):
-        # force-based, consistent with the static/pushover references; the column is still
-        # subdivided into `nelem` elements so `self_mass` distributes by tributary length like
-        # the lattice's lumped self-mass (the subdivision also keeps the per-element span short,
-        # which helps the element-level state determination converge under dynamic increments).
-        ops.element("forceBeamColumn", e, e, e + 1, 1, 1)
+    ops.element("forceBeamColumn", 1, 1, 2, 1, 1, "-mass", self_mass / height)  # distributed self-mass
 
-    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1); ops.load(nnode, 0.0, -P, 0.0)
+    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1); ops.load(2, 0.0, -P, 0.0)
     ops.system("BandGeneral"); ops.numberer("RCM"); ops.constraints("Transformation")
     ops.test("NormDispIncr", 1e-8, 100); ops.algorithm("Newton")
     ops.integrator("LoadControl", 0.1); ops.analysis("Static")
     if ops.analyze(10) != 0:
         return {"converged": False, "stage": "gravity", "t": [], "disp": [], "shear": [],
-                "control_node": nnode, "base_nodes": [1]}
+                "control_node": 2, "base_nodes": [1]}
     ops.loadConst("-time", 0.0)
 
     res = _transient_uniform_excitation(accel=accel, dt_record=dt_record, scale=scale, dof=1,
-                                        control_node=nnode, control_dof=1, base_nodes=[1],
+                                        control_node=2, control_dof=1, base_nodes=[1],
                                         dt=dt, zeta=damping_ratio, modes=modes, tol=tol)
     return res
 
 
-def run_beamcolumn_modal(*, height: float, materials, nelem: int, self_mass: float,
+def run_beamcolumn_modal(*, height: float, materials, self_mass: float,
                          num_modes: int) -> dict:
-    """First `num_modes` modes of the subdivided fiber `forceBeamColumn` cantilever — the modal
+    """First `num_modes` modes of the SINGLE-element fiber `forceBeamColumn` cantilever — the modal
     counterpart of `run_beamcolumn_dynamic`, for the calibration mode-shape report (D35).
 
-    Same discretization (nelem segments, nodes at the lattice row heights) and tributary `self_mass`
-    as the dynamic run, so it is MASS-CONSISTENT with the lattice/continuum (equal total mass → the
-    periods are directly comparable, D16). No top mass and no gravity, so the eigen sees the
-    initial-tangent stiffness at the undeformed state — exactly like the lattice/continuum modal in
-    `run_modal`. Returns {"periods", "shapes" (per mode, {node: [ux, uy, rot]}), "model"} where
-    `model` is a lightweight drawing `Model` (vertical line of nodes + segments) for the visualizer."""
+    One force-based fiber element (fixed base node 1, free top node 2, 5 Lobatto points), matching
+    the dynamic reference. `self_mass` is carried as DISTRIBUTED element mass (`-mass`) so the total
+    mass matches the lattice/continuum (the periods stay comparable, D16). No top mass and no gravity,
+    so the eigen sees the initial-tangent stiffness at the undeformed state — like the lattice/
+    continuum modal in `run_modal`. NB: a single element resolves only the first flexural mode well;
+    higher requested modes are coarse (the accepted single-element trade-off). Returns
+    {"periods", "shapes" (per mode, {node: [ux, uy, rot]}), "model"} where `model` is a lightweight
+    drawing `Model` (two nodes + one segment) for the visualizer."""
     ops.wipe()
     ops.model("basic", "-ndm", 2, "-ndf", 3)
-    nnode = nelem + 1
-    seg = height / nelem
-    for i in range(1, nnode + 1):
-        ops.node(i, 0.0, seg * (i - 1))
+    ops.node(1, 0.0, 0.0); ops.node(2, 0.0, height)
     ops.fix(1, 1, 1, 1)
-    for i in range(1, nnode + 1):
-        trib = seg if 1 < i < nnode else seg / 2.0          # half-tributary at the ends
-        m = self_mass * trib / height
-        ops.mass(i, m, m, 0.0)                               # translational only (no rotary inertia)
 
     _rc_fiber_section(1, materials=materials)
     ops.geomTransf("PDelta", 1)
     ops.beamIntegration("Lobatto", 1, 1, 5)
-    for e in range(1, nelem + 1):
-        ops.element("forceBeamColumn", e, e, e + 1, 1, 1)
+    ops.element("forceBeamColumn", 1, 1, 2, 1, 1, "-mass", self_mass / height)  # distributed self-mass
 
     try:
         eigenvalues = ops.eigen(num_modes)                  # genBandArpack: lowest modes (massless rot DOFs ok)
@@ -640,15 +624,13 @@ def run_beamcolumn_modal(*, height: float, materials, nelem: int, self_mass: flo
         eigenvalues = ops.eigen("-fullGenLapack", num_modes)
     periods = [2.0 * math.pi / math.sqrt(lam) if lam > 0.0 else math.inf for lam in eigenvalues]
     shapes = [
-        {i: ops.nodeEigenvector(i, mode) for i in range(1, nnode + 1)}
+        {i: ops.nodeEigenvector(i, mode) for i in range(1, 3)}
         for mode in range(1, num_modes + 1)
     ]
 
-    model = Model(ndm=2, ndf=2)                              # drawing-only model (lines along the height)
-    for i in range(1, nnode + 1):
-        model.add_node(i, (0.0, seg * (i - 1)))
-    for e in range(1, nelem + 1):
-        model.add_element(e, "line", (e, e + 1), kind="concrete")
+    model = Model(ndm=2, ndf=2)                              # drawing-only model (one line along the height)
+    model.add_node(1, (0.0, 0.0)); model.add_node(2, (0.0, height))
+    model.add_element(1, "line", (1, 2), kind="concrete")
     return {"periods": list(periods), "shapes": shapes, "model": model}
 
 

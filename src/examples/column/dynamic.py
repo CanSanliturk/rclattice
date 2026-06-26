@@ -4,8 +4,8 @@ Same specimen, materials, stiffness calibration, and lattice graph (HORIZON) as 
 setup is imported from this package, so the ONLY new ingredients are dynamic. Both models are driven
 by the SAME scaled UniformExcitation (seismic base input) in X:
 
-  - reference: the fiber `forceBeamColumn` column, SUBDIVIDED to the lattice's row heights so its
-    self-mass distributes identically (run_beamcolumn_dynamic);
+  - reference: a SINGLE-element fiber `forceBeamColumn` column carrying its self-mass as distributed
+    element mass (run_beamcolumn_dynamic);
   - lattice: the calibrated RC lattice (run_dynamic).
 
 The base excitation is selectable via `--excitation` (default `sine`): a harmonic acceleration
@@ -36,7 +36,7 @@ from build import (
     modal_calibration_figure, rc_lattice,
 )
 from excitation import G, N_CYCLES, RHO, make_excitation, tune_intensity
-from specimen import CORE, COVER_C, EPS, GF, GFC, H, HORIZON, MESH, OUT, P, STEEL, THK, W
+from specimen import CORE, COVER_C, EPS, GF, GFC, H, HORIZON, OUT, P, STEEL, THK, W
 
 TARGET_DRIFT = 2.0                          # in (~1.5% of H): moderate, well past yield
 DT = 0.005                            # integration step: <= the sine record spacing (~T1/100)
@@ -56,7 +56,6 @@ def main(*, reference: str = "beamcolumn", horizon: float = HORIZON, regularize:
 
     self_mass = RHO * W * H * THK           # total column self-mass (rho * volume)
     top_mass = P / G                        # axial load P treated as tributary seismic mass
-    nelem = int(round(H / MESH))            # subdivide the fiber column to the lattice rows
     print(f"mass: self={self_mass:.3e}, top P/g={top_mass:.3e} kip-s^2/in  (top/self = {top_mass/self_mass:.0f}x)")
 
     bc_materials = (concrete_uniaxial_nonlinear(CORE, 1),
@@ -120,7 +119,7 @@ def main(*, reference: str = "beamcolumn", horizon: float = HORIZON, regularize:
     # its K0 differs from the matched lattice/continuum, so the achieved drift is approximate — the
     # lattice-vs-continuum comparison is unaffected (both get the identical scaled record).
     def run_bc(intensity: float) -> dict:
-        return run_beamcolumn_dynamic(height=H, P=P, materials=bc_materials, nelem=nelem,
+        return run_beamcolumn_dynamic(height=H, P=P, materials=bc_materials,
                                       self_mass=self_mass, top_mass=top_mass, accel=accel,
                                       dt_record=dt_rec, scale=G * intensity, dt=dt)
 

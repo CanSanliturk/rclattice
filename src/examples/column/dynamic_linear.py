@@ -8,8 +8,8 @@ so the two models can agree only through their LINEAR dynamic properties — mas
 (hence period), and damping. Those are matched by construction here, so the responses should track
 closely.
 
-  - reference beamcolumn: the fiber `forceBeamColumn` (Elastic fibers), subdivided to the lattice
-    row heights so its self-mass distributes identically;
+  - reference beamcolumn: a SINGLE-element fiber `forceBeamColumn` (Elastic fibers) carrying its
+    self-mass as distributed element mass;
   - reference continuum: the 2D plane-stress continuum with ElasticIsotropic+PlaneStress quads and
     elastic rebar — the like-for-like elastic linear analog of the nonlinear continuum (D29/D30);
   - lattice: the SAME elastic RC lattice (build_lattice_rc, Elastic concrete + rebar), strut area
@@ -36,7 +36,7 @@ from build import (
     continuum_k0_linear, modal_calibration_figure, rc_lattice_linear,
 )
 from excitation import G, N_CYCLES, RHO, make_excitation, tune_intensity
-from specimen import CORE, COVER_C, EPS, H, MESH, OUT, P, STEEL, THK, W
+from specimen import CORE, COVER_C, EPS, H, OUT, P, STEEL, THK, W
 
 TARGET_DRIFT = 1.0     # in — keep well inside the elastic range (no yield to chase); just sets amplitude
 DT = 0.01              # Newmark step (record is at 0.02 s)
@@ -51,7 +51,6 @@ def main(*, reference: str = "beamcolumn", target_drift: float = TARGET_DRIFT, d
 
     self_mass = RHO * W * H * THK            # total column self-mass (rho * volume)
     top_mass = P / G                         # axial load P treated as tributary seismic mass
-    nelem = int(round(H / MESH))             # subdivide the fiber column to the lattice rows
     print(f"mass: self={self_mass:.3e}, top P/g={top_mass:.3e} kip-s^2/in (top/self={top_mass/self_mass:.0f}x)")
 
     bc_materials = (concrete_uniaxial_elastic(CORE, 1),
@@ -106,7 +105,7 @@ def main(*, reference: str = "beamcolumn", target_drift: float = TARGET_DRIFT, d
           f"duration={(len(accel) - 1) * dt_rec:.1f}s")
 
     def run_bc(intensity: float) -> dict:
-        return run_beamcolumn_dynamic(height=H, P=P, materials=bc_materials, nelem=nelem,
+        return run_beamcolumn_dynamic(height=H, P=P, materials=bc_materials,
                                       self_mass=self_mass, top_mass=top_mass, accel=accel,
                                       dt_record=dt_rec, scale=G * intensity, dt=dt)
 

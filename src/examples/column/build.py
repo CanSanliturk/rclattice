@@ -137,7 +137,7 @@ def modal_calibration_figure(*, reference: str, lattice_model, label: str, capti
     the SELECTED reference, with a periods table underneath, to `savepath`.
 
     The reference is whatever `--reference` picked: the 2D RC continuum (`run_modal` on
-    `_continuum_model`) or the subdivided fiber beam-column (`run_beamcolumn_modal`). Both are put on
+    `_continuum_model`) or the single-element fiber beam-column (`run_beamcolumn_modal`). Both are put on
     a mass-consistent footing with the lattice so the periods are directly comparable — the continuum
     shares the builder tributary mass by construction (D16); the beam-column is given the lattice's
     total self-mass. The lattice is the as-built calibrated model (self-mass only, no seismic top
@@ -150,13 +150,12 @@ def modal_calibration_figure(*, reference: str, lattice_model, label: str, capti
     if reference == "continuum":
         ref_model = (_continuum_model_linear() if linear else _continuum_model(Gf, Gfc))[0]
         ref = run_modal(ref_model, n_modes)
-    else:  # beamcolumn — subdivided fiber stick, total mass matched to the lattice
+    else:  # beamcolumn — single-element fiber stick, total mass matched to the lattice
         mats = ((concrete_uniaxial_elastic(CORE, 1), concrete_uniaxial_elastic(COVER_C, 2),
                  steel_uniaxial_elastic(STEEL, 3)) if linear else
                 (concrete_uniaxial_nonlinear(CORE, 1), concrete_uniaxial_nonlinear(COVER_C, 2),
                  steel_uniaxial(STEEL, 3)))
-        ref = run_beamcolumn_modal(height=H, materials=mats, nelem=int(round(H / MESH)),
-                                   self_mass=lat_total, num_modes=n_modes)
+        ref = run_beamcolumn_modal(height=H, materials=mats, self_mass=lat_total, num_modes=n_modes)
         ref_model = ref["model"]
 
     rows = []

@@ -682,3 +682,34 @@ unlogged decision or a skipped number; please confirm.)
 - **Status:** implemented + verified (column pushover beamcolumn/continuum, column/frame linear,
   dynamic in-flow). Backend independence preserved (figure I/O lives in the example layer; `viz`
   imports no openseespy).
+
+### D36 — 2026-06-26 — Column beam-column reference is a SINGLE `forceBeamColumn` element everywhere (dynamic + modal), not subdivided
+- **Decision:** in the `examples/column/` scripts, when `--reference beamcolumn`, the column is
+  represented by **one** force-based fiber `forceBeamColumn` element (fixed base node 1, free top
+  node 2, 5 Lobatto points) across **all** analyses — pushover, dynamic, and the D35 modal figure.
+  The pushover reference (`run_beamcolumn_cantilever`) was already single-element; this brings the
+  *dynamic* (`run_beamcolumn_dynamic`) and *modal* (`run_beamcolumn_modal`) references into line.
+  Self-mass is now carried as **distributed element mass** (`-mass self_mass/height`) and the
+  axial-load seismic mass `P/g` is lumped at the top — identical to `single_beamcolumn.py`.
+- **Why:** the user wants the column reference idealized as a single member (as in
+  `single_beamcolumn.py`), not a ~96-element stick. A single force-based element with 5 Lobatto
+  points already captures the fiber-section nonlinearity; the subdivision was only there to spread
+  lumped nodal mass and shorten per-element spans. `single_beamcolumn.py` proves the single element
+  converges under dynamic increments (same `_transient_uniform_excitation` sub-stepping/algorithm
+  fallback), so the subdivision is unnecessary.
+- **Supersedes (partially):** the column half of D30/D35's "subdivide the fiber reference to the
+  lattice row heights." The **frame** references (`run_beamcolumn_frame_dynamic` /
+  `run_beamcolumn_frame_modal`) are unchanged — still subdivided.
+- **Trade-off accepted (with the user):** a single 2-node element resolves only the **first
+  flexural mode** well. In the D35 modal figure the beam-column's modes 2–3 are now axial/rotational
+  artifacts (mode 3's massless rotational DOF gives `T→0`). The user chose "single element
+  everywhere" knowing this; `N_MODES` stays 3 (the continuum reference still resolves 3 real modes).
+  Requesting `≥` the available DOFs makes ARPACK fall back to `fullGenLapack` (instant on the tiny
+  system; the existing `try/except` already handles it — only cosmetic OpenSees stderr).
+- **Mechanics:** `run_beamcolumn_dynamic` / `run_beamcolumn_modal` lost their `nelem` parameter and
+  the nodal-mass distribution loop; callers (`dynamic.py`, `dynamic_linear.py`, `build.py`) drop the
+  `nelem` argument (and the now-unused `MESH` import). The modal runner's drawing `Model` is now two
+  nodes + one segment.
+- **Status:** implemented + verified (single-element seismic reference converges; modal figure
+  renders; test suite unchanged at 25 pass + the one pre-existing known-fail). Backend independence
+  preserved.
