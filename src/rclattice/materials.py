@@ -23,6 +23,15 @@ def concrete_nd_elastic(grade: ConcreteGrade, tag: int) -> NDMaterial:
     return NDMaterial(tag, "ElasticIsotropic", (grade.E, grade.nu))
 
 
+def concrete_nd_elastic_planestress(grade: ConcreteGrade, tag: int) -> tuple[NDMaterial, NDMaterial]:
+    """Elastic nD material pair for plane-stress quads (linear analog of ``concrete_nd_nonlinear``):
+    ElasticIsotropic base + a PlaneStress wrapper. Tags and wrapper args are assigned by the
+    builder (same contract as ``concrete_nd_nonlinear``)."""
+    base = NDMaterial(tag, "ElasticIsotropic", (grade.E, grade.nu))
+    wrapper = NDMaterial(tag + 1, "PlaneStress", ())   # args (base tag) filled in by the builder
+    return base, wrapper
+
+
 def concrete_nd_nonlinear(
     grade: ConcreteGrade,
     base_tag: int,

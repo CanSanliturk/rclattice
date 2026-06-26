@@ -605,6 +605,53 @@ def run_beamcolumn_dynamic(*, height: float, P: float, materials, nelem: int,
     return res
 
 
+def run_beamcolumn_modal(*, height: float, materials, nelem: int, self_mass: float,
+                         num_modes: int) -> dict:
+    """First `num_modes` modes of the subdivided fiber `forceBeamColumn` cantilever — the modal
+    counterpart of `run_beamcolumn_dynamic`, for the calibration mode-shape report (D35).
+
+    Same discretization (nelem segments, nodes at the lattice row heights) and tributary `self_mass`
+    as the dynamic run, so it is MASS-CONSISTENT with the lattice/continuum (equal total mass → the
+    periods are directly comparable, D16). No top mass and no gravity, so the eigen sees the
+    initial-tangent stiffness at the undeformed state — exactly like the lattice/continuum modal in
+    `run_modal`. Returns {"periods", "shapes" (per mode, {node: [ux, uy, rot]}), "model"} where
+    `model` is a lightweight drawing `Model` (vertical line of nodes + segments) for the visualizer."""
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    nnode = nelem + 1
+    seg = height / nelem
+    for i in range(1, nnode + 1):
+        ops.node(i, 0.0, seg * (i - 1))
+    ops.fix(1, 1, 1, 1)
+    for i in range(1, nnode + 1):
+        trib = seg if 1 < i < nnode else seg / 2.0          # half-tributary at the ends
+        m = self_mass * trib / height
+        ops.mass(i, m, m, 0.0)                               # translational only (no rotary inertia)
+
+    _rc_fiber_section(1, materials=materials)
+    ops.geomTransf("PDelta", 1)
+    ops.beamIntegration("Lobatto", 1, 1, 5)
+    for e in range(1, nelem + 1):
+        ops.element("forceBeamColumn", e, e, e + 1, 1, 1)
+
+    try:
+        eigenvalues = ops.eigen(num_modes)                  # genBandArpack: lowest modes (massless rot DOFs ok)
+    except Exception:
+        eigenvalues = ops.eigen("-fullGenLapack", num_modes)
+    periods = [2.0 * math.pi / math.sqrt(lam) if lam > 0.0 else math.inf for lam in eigenvalues]
+    shapes = [
+        {i: ops.nodeEigenvector(i, mode) for i in range(1, nnode + 1)}
+        for mode in range(1, num_modes + 1)
+    ]
+
+    model = Model(ndm=2, ndf=2)                              # drawing-only model (lines along the height)
+    for i in range(1, nnode + 1):
+        model.add_node(i, (0.0, seg * (i - 1)))
+    for e in range(1, nelem + 1):
+        model.add_element(e, "line", (e, e + 1), kind="concrete")
+    return {"periods": list(periods), "shapes": shapes, "model": model}
+
+
 def run_benchmark_rc_frame(*, dU: float = 0.1, target: float = 15.0, gravity_P: float = 180.0) -> dict:
     """The original OpenSees RC frame pushover (RCFrameGravity -> RCFramePushOver), kip-in.
 
@@ -810,3 +857,84 @@ def run_beamcolumn_frame_dynamic(*, height: float, span: float, beam_depth: floa
     return _transient_uniform_excitation(accel=accel, dt_record=dt_record, scale=scale, dof=1,
                                          control_node=joint_L, control_dof=1, base_nodes=[1, rbase],
                                          dt=dt, zeta=damping_ratio, modes=modes, tol=tol)
+
+
+def run_beamcolumn_frame_modal(*, height: float, span: float, beam_depth: float, beam_width: float,
+                               materials, ncol: int, nbeam: int, self_mass_col: float,
+                               self_mass_beam: float, num_modes: int, beam_materials=None,
+                               beam_top_area: float = 1.8, beam_bot_area: float = 1.8) -> dict:
+    """First `num_modes` modes of the subdivided fiber portal frame — the modal counterpart of
+    `run_beamcolumn_frame_dynamic` for the calibration mode-shape report (D35), and the frame analog of
+    `run_beamcolumn_modal`. Same discretization (each column into `ncol`, the beam into `nbeam`) and
+    tributary `self_mass_col`/`self_mass_beam`, so it is mass-consistent with the lattice/continuum
+    frame; no top mass and no gravity → the eigen sees the initial-tangent stiffness. Returns
+    {"periods", "shapes" (per mode, {node: [ux, uy, rot]}), "model"} where `model` is a lightweight
+    drawing `Model` (the two columns + the beam as line segments) for the visualizer."""
+    from collections import defaultdict
+
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    col_seg, beam_seg = height / ncol, span / nbeam
+    for i in range(ncol + 1):                                 # left column nodes 1 .. ncol+1
+        ops.node(1 + i, 0.0, col_seg * i)
+    joint_L = ncol + 1
+    rbase = ncol + 2
+    for i in range(ncol + 1):                                 # right column nodes rbase .. rbase+ncol
+        ops.node(rbase + i, span, col_seg * i)
+    joint_R = rbase + ncol
+    beam_nodes = [joint_L]                                    # beam: joint_L, interior, joint_R
+    nid = joint_R + 1
+    for k in range(1, nbeam):
+        ops.node(nid, beam_seg * k, height)
+        beam_nodes.append(nid)
+        nid += 1
+    beam_nodes.append(joint_R)
+    ops.fix(1, 1, 1, 1); ops.fix(rbase, 1, 1, 1)
+
+    m: dict[int, float] = defaultdict(float)                  # tributary self-mass (no top mass)
+    for col_base in (1, rbase):
+        for i in range(ncol + 1):
+            trib = col_seg if 0 < i < ncol else col_seg / 2.0
+            m[col_base + i] += self_mass_col * trib / height
+    for idx, n in enumerate(beam_nodes):
+        trib = beam_seg if 0 < idx < len(beam_nodes) - 1 else beam_seg / 2.0
+        m[n] += self_mass_beam * trib / span
+    for n, mv in m.items():
+        ops.mass(n, mv, mv, 0.0)                              # translational only (no rotary inertia)
+
+    _rc_fiber_section(1, materials=materials)
+    _beam_section(2, depth=beam_depth, width=beam_width, top_area=beam_top_area,
+                  bot_area=beam_bot_area, beam_materials=beam_materials)
+    ops.geomTransf("PDelta", 1); ops.geomTransf("Linear", 2)
+    ops.beamIntegration("Lobatto", 1, 1, 5); ops.beamIntegration("Lobatto", 2, 2, 5)
+    eid = 1
+    segments: list[tuple[int, int]] = []
+    for col_base in (1, rbase):                               # columns (subdivided)
+        for i in range(ncol):
+            ops.element("forceBeamColumn", eid, col_base + i, col_base + i + 1, 1, 1)
+            segments.append((col_base + i, col_base + i + 1)); eid += 1
+    for a, b in zip(beam_nodes, beam_nodes[1:]):             # beam (subdivided)
+        ops.element("forceBeamColumn", eid, a, b, 2, 2)
+        segments.append((a, b)); eid += 1
+
+    try:
+        eigenvalues = ops.eigen(num_modes)
+    except Exception:
+        eigenvalues = ops.eigen("-fullGenLapack", num_modes)
+    periods = [2.0 * math.pi / math.sqrt(lam) if lam > 0.0 else math.inf for lam in eigenvalues]
+    all_nodes = (list(range(1, joint_L + 1)) + list(range(rbase, joint_R + 1)) + beam_nodes[1:-1])
+    shapes = [
+        {n: ops.nodeEigenvector(n, mode) for n in all_nodes}
+        for mode in range(1, num_modes + 1)
+    ]
+
+    model = Model(ndm=2, ndf=2)                              # drawing-only model (columns + beam lines)
+    for i in range(ncol + 1):
+        model.add_node(1 + i, (0.0, col_seg * i))
+    for i in range(ncol + 1):
+        model.add_node(rbase + i, (span, col_seg * i))
+    for k in range(1, nbeam):
+        model.add_node(joint_R + k, (beam_seg * k, height))
+    for j, (a, b) in enumerate(segments, start=1):
+        model.add_element(j, "line", (a, b), kind="concrete")
+    return {"periods": list(periods), "shapes": shapes, "model": model}

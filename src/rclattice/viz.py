@@ -193,6 +193,21 @@ def align_sign(reference: dict, shape: dict) -> dict:
     return shape
 
 
+def sign_fix(shape: dict) -> dict:
+    """Flip a mode shape so its largest-magnitude translational component is positive.
+
+    A deterministic, model-agnostic sign (unlike `align_sign`, which needs shared node ids) — so the
+    reference and the lattice mode shapes, which live on DIFFERENT meshes, both lean the same way."""
+    best = 0.0
+    for v in shape.values():
+        for c in (v[0], v[1]):
+            if abs(c) > abs(best):
+                best = c
+    if best < 0.0:
+        return {k: [-c for c in v] for k, v in shape.items()}
+    return shape
+
+
 def figure_static(lattice, lat_disp, continuum, cont_disp, *, savepath=None):
     """Side-by-side static deformed shapes (shared scale from the continuum reference)."""
     scale = autoscale_factor(continuum, cont_disp)
@@ -226,6 +241,51 @@ def figure_modes(panels, *, savepath=None):
     fig.tight_layout()
     if savepath:
         fig.savefig(savepath, dpi=130)
+    return fig
+
+
+def figure_modal_calibration(reference, lattice, table_rows, *, caption="", savepath=None,
+                             title="Modal calibration: reference vs lattice", dpi=150):
+    """Calibration mode-shape report (D35): an N-column mode-shape grid with the reference model on the
+    TOP row and the lattice on the BOTTOM row, and a periods table underneath.
+
+    `reference` / `lattice` are dicts {"model": Model, "shapes": [shape per mode], "label": str,
+    "color": str} (a mode shape is {node_id: [u...]}). `table_rows` is a list of
+    (mode, T_ref, T_lattice, delta_pct) — one row per mode (its length sets the number of columns).
+    `caption` is the one-line calibration summary (areas / RMS / K0-match), drawn under the table.
+
+    Each mode shape is sign-fixed (`sign_fix`) independently — the reference and lattice are on
+    different meshes, so they cannot be cross-aligned by node id — and auto-scaled to its own model."""
+    n = len(table_rows)
+    rows = [reference, lattice]
+    fig = plt.figure(figsize=(max(3.6 * n + 0.6, 6.0), 9.0))
+    gs = fig.add_gridspec(3, n, height_ratios=[1.0, 1.0, 0.5], hspace=0.16, wspace=0.05,
+                          left=0.06, right=0.98, top=0.93, bottom=0.04)
+    for r, panel in enumerate(rows):
+        model, shapes = panel["model"], panel["shapes"]
+        for c in range(n):
+            ax = fig.add_subplot(gs[r, c])
+            shape = sign_fix(shapes[c])
+            draw_model(ax, model, shape, autoscale_factor(model, shape), color=panel["color"])
+            if r == 0:
+                ax.set_title(f"mode {c + 1}", fontsize=10)
+            if c == 0:
+                ax.set_ylabel(panel["label"], fontsize=10)
+
+    ax_t = fig.add_subplot(gs[2, :])
+    ax_t.axis("off")
+    col_labels = ["mode", "T_ref (s)", "T_lattice (s)", "Δ vs reference (%)"]
+    cell_text = [[str(int(m)), f"{tr:.4f}", f"{tl:.4f}", f"{d:+.2f}"] for m, tr, tl, d in table_rows]
+    tbl = ax_t.table(cellText=cell_text, colLabels=col_labels, loc="center", cellLoc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    tbl.scale(1.0, 1.5)
+
+    fig.suptitle(title, fontsize=12)
+    if caption:
+        fig.text(0.5, 0.012, caption, ha="center", fontsize=8.5, style="italic")
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
     return fig
 
 

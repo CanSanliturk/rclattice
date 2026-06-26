@@ -15,6 +15,7 @@ adds a fixed parallel stiffness, so K0 is not proportional to area) via a secant
 
 from __future__ import annotations
 
+from rclattice import viz
 from rclattice.builders import build_continuum_rc, build_lattice, build_lattice_rc
 from rclattice.calibration import calibrate_lattice, continuum_targets
 from rclattice.materials import (
@@ -25,13 +26,17 @@ from rclattice.materials import (
     steel_uniaxial,
     steel_uniaxial_elastic,
 )
-from rclattice.opensees import run_beamcolumn_frame, run_dynamic, run_pushover
+from rclattice.opensees import (
+    run_beamcolumn_frame, run_beamcolumn_frame_modal, run_dynamic, run_modal, run_pushover,
+)
 
 from specimen import (
-    BEAM, CORE, COVER_C, DU, GF, GFC, H, HORIZON, MESH, P, SPAN, STEEL, TARGET, THK,
+    BEAM, COL, CORE, COVER_C, DU, GF, GFC, H, HORIZON, MESH, P, SPAN, STEEL, TARGET, THK,
     add_axial_mass, control_base_nodes, frame_problem, lateral_loads, longitudinal_rebars,
     rebars, zone_of,
 )
+
+N_MODES = 3   # first N modal periods drawn + tabulated in the calibration figure (D35)
 
 
 # --- nonlinear models (Concrete02 / Steel02) --------------------------------
@@ -141,6 +146,53 @@ def make_reference(name: str, beam_nonlinear: bool = False) -> dict:
     if name == "continuum":
         return continuum_reference()
     raise ValueError(f"unknown reference {name!r} (expected 'beamcolumn' or 'continuum')")
+
+
+def modal_calibration_figure(*, reference: str, lattice_model, label: str, caption: str,
+                             savepath: str, linear: bool = False, beam_nonlinear: bool = False,
+                             n_modes: int = N_MODES, Gf: float = GF, Gfc: float = GFC) -> tuple[list, list]:
+    """Calibration output (D35): draw the first `n_modes` mode shapes of the calibrated lattice frame
+    and the SELECTED reference, with a periods table underneath, to `savepath`. The frame analog of
+    `examples/column/build.py:modal_calibration_figure`.
+
+    The reference is whatever `--reference` picked: the 2D RC continuum frame (`run_modal` on
+    `_continuum_model`) or the subdivided fiber portal frame (`run_beamcolumn_frame_modal`, the frame's
+    fiber reference). Both are mass-consistent with the lattice — the continuum shares the builder
+    tributary mass by construction (D16); the fiber frame gets the same geometry-based self-mass per
+    member as the dynamic run. The lattice is the as-built calibrated model (self-mass only, no seismic
+    top mass). The fit target stays the continuum (D16), so the table column is a plain `Δ vs
+    reference`. Returns (reference_periods, lattice_periods)."""
+    lat = run_modal(lattice_model, n_modes)
+
+    if reference == "continuum":
+        ref_model = _continuum_model(Gf, Gfc)[0]
+        ref = run_modal(ref_model, n_modes)
+    else:  # fiber portal frame — same member self-mass as the dynamic reference (geometry * rho)
+        mats = ((concrete_uniaxial_elastic(CORE, 1), concrete_uniaxial_elastic(COVER_C, 2),
+                 steel_uniaxial_elastic(STEEL, 3)) if linear else
+                (concrete_uniaxial_nonlinear(CORE, 1), concrete_uniaxial_nonlinear(COVER_C, 2),
+                 steel_uniaxial(STEEL, 3)))
+        beam_mats = None if linear else _beam_fiber_materials(beam_nonlinear)
+        ref = run_beamcolumn_frame_modal(
+            height=H, span=SPAN, beam_depth=BEAM, beam_width=THK, materials=mats,
+            ncol=int(round(H / MESH)), nbeam=int(round(SPAN / MESH)),
+            self_mass_col=CORE.rho * THK * COL * H, self_mass_beam=CORE.rho * THK * (SPAN + COL) * BEAM,
+            num_modes=n_modes, beam_materials=beam_mats)
+        ref_model = ref["model"]
+
+    rows = []
+    for i in range(n_modes):
+        tr, tl = ref["periods"][i], lat["periods"][i]
+        d = 100.0 * (tl - tr) / tr if tr not in (0.0, float("inf")) else float("nan")
+        rows.append((i + 1, tr, tl, d))
+
+    viz.figure_modal_calibration(
+        {"model": ref_model, "shapes": ref["shapes"], "label": label, "color": "C3"},
+        {"model": lattice_model, "shapes": lat["shapes"], "label": "RC lattice", "color": "C0"},
+        rows, caption=caption, savepath=savepath,
+        title=f"Modal calibration: {label} vs RC lattice (first {n_modes} modes)",
+    )
+    return ref["periods"], lat["periods"]
 
 
 def calibrate_area(k_ref: float, *, horizon: float = HORIZON):

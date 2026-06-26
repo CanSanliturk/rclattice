@@ -23,7 +23,8 @@ from rclattice import viz
 from rclattice.opensees import run_pushover
 
 from build import (
-    _continuum_model, beamcolumn_reference, calibrate_area, calibrate_groups, make_reference, rc_lattice,
+    _continuum_model, beamcolumn_reference, calibrate_area, calibrate_groups, make_reference,
+    modal_calibration_figure, rc_lattice,
 )
 from specimen import DU, GF, GFC, H, HORIZON, MESH, OUT, TARGET, lateral_loads
 
@@ -44,10 +45,13 @@ def main(*, reference: str = "beamcolumn", calibration: str = "scalar", horizon:
     if calibration == "groups":
         area, ctrl, base, cal = calibrate_groups(horizon=horizon)   # strong 2-group fit (D16)
         o, d = cal.areas["orthogonal"], cal.areas["diagonal"]
+        caption = (f"groups calibration — A_ortho={o:.3f}, A_diag={d:.3f} in^2 (d/o {d/o:.2f}), "
+                   f"RMS {cal.rms:.3f}, success={cal.success}")
         print(f"strong 2-group calibration (continuum static+modal): orthogonal A={o:.3f}, "
               f"diagonal A={d:.3f} in^2 (d/o ratio {d/o:.2f}, RMS {cal.rms:.3f}, success={cal.success})")
     else:
         area, ctrl, base = calibrate_area(k_ref, horizon=horizon)
+        caption = f"scalar calibration — strut area A={area:.3f} in^2 (K0 match to {label})"
         print(f"scalar calibration: strut area A = {area:.3f} in^2 (K0 match to {label})")
 
     mode = f"length-regularized (Gf={Gf:g}, Gfc={Gfc:g})" if regularize else "plain (no regularization)"
@@ -75,6 +79,13 @@ def main(*, reference: str = "beamcolumn", calibration: str = "scalar", horizon:
         title=f"RC cantilever column pushover: lattice ({calibration} calib.) vs {label}",
     )
     print(f"saved pushover curve to {savepath}")
+
+    # calibration output (D35): first N mode shapes (selected reference vs lattice) + periods table
+    modalpath = outdir / f"column_modal_{reference}{suffix}{hz}.png"
+    t_ref, t_lat = modal_calibration_figure(reference=reference, lattice_model=model, label=label,
+                                            caption=caption, savepath=str(modalpath), Gf=Gf, Gfc=Gfc)
+    print(f"modal calibration: {label} T={[f'{t:.4f}' for t in t_ref]} s | "
+          f"lattice T={[f'{t:.4f}' for t in t_lat]} s -> saved {modalpath}")
 
     if draw:
         panels = [("RC lattice", model)]

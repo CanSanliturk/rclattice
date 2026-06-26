@@ -32,7 +32,8 @@ from rclattice.materials import concrete_uniaxial_nonlinear, steel_uniaxial
 from rclattice.opensees import run_beamcolumn_dynamic, run_dynamic, run_modal
 
 from build import (
-    _continuum_model, beamcolumn_reference, calibrate_area, continuum_dynamic, continuum_k0, rc_lattice,
+    _continuum_model, beamcolumn_reference, calibrate_area, continuum_dynamic, continuum_k0,
+    modal_calibration_figure, rc_lattice,
 )
 from excitation import G, N_CYCLES, RHO, make_excitation, tune_intensity
 from specimen import CORE, COVER_C, EPS, GF, GFC, H, HORIZON, MESH, OUT, P, STEEL, THK, W
@@ -77,6 +78,17 @@ def main(*, reference: str = "beamcolumn", horizon: float = HORIZON, regularize:
 
     # lattice + top seismic mass baked into the model (so modal AND dynamic both see it)
     model = rc_lattice(regularize, Gf, Gfc, area, horizon=horizon)
+
+    # calibration output (D35): mode shapes (selected reference vs lattice) + periods table, drawn
+    # up front on the self-mass basis the calibration uses (BEFORE the seismic top mass is added)
+    hz = "" if abs(horizon - HORIZON) < 1e-9 else f"_h{horizon:g}"
+    cal_caption = f"scalar calibration — strut area A={area:.3f} in^2 (K0 match to {ref_label})"
+    modalpath = outdir / f"column_modal_{reference}{hz}.png"
+    t_ref, t_lat = modal_calibration_figure(reference=reference, lattice_model=model, label=ref_label,
+                                            caption=cal_caption, savepath=str(modalpath), Gf=Gf, Gfc=Gfc)
+    print(f"modal calibration: {ref_label} T={[f'{t:.4f}' for t in t_ref]} s | "
+          f"lattice T={[f'{t:.4f}' for t in t_lat]} s -> saved {modalpath}")
+
     top_nodes = select_nodes(model, (-W, W, H - EPS, H + EPS))
     for nid in top_nodes:
         mx, my = model.masses[nid]

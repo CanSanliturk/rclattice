@@ -30,7 +30,9 @@ from rclattice import viz
 from rclattice.materials import concrete_uniaxial_elastic, steel_uniaxial_elastic
 from rclattice.opensees import run_beamcolumn_frame_dynamic, run_dynamic, run_modal
 
-from build import beamcolumn_reference_linear, calibrate_area_linear, rc_lattice_linear
+from build import (
+    beamcolumn_reference_linear, calibrate_area_linear, modal_calibration_figure, rc_lattice_linear,
+)
 from excitation import G, N_CYCLES, RHO, make_excitation, tune_intensity
 from specimen import BEAM, COL, CORE, COVER_C, H, MESH, OUT, P, SPAN, STEEL, THK, add_axial_mass
 
@@ -62,6 +64,17 @@ def main(*, target_drift: float = TARGET_DRIFT, dt: float = DT,
 
     # lattice + per-column top seismic mass baked into the model (so modal AND dynamic both see it)
     model = rc_lattice_linear(area)
+
+    # calibration output (D35): mode shapes (elastic fiber frame vs lattice) + periods table, drawn up
+    # front on the self-mass calibration basis (BEFORE the seismic top mass is added below)
+    cal_caption = f"linear scalar calibration — strut area A={area:.3f} in^2 (K0 match to {k_bc:.2f} kip/in)"
+    modalpath = outdir / "frame_modal_linear.png"
+    t_ref, t_lat = modal_calibration_figure(reference="beamcolumn", lattice_model=model,
+                                            label="elastic fiber frame", caption=cal_caption,
+                                            savepath=str(modalpath), linear=True)
+    print(f"modal calibration: fiber frame T={[f'{t:.4f}' for t in t_ref]} s | "
+          f"lattice T={[f'{t:.4f}' for t in t_lat]} s -> saved {modalpath}")
+
     add_axial_mass(model, top_mass)
 
     lat_T = run_modal(model, 2)["periods"]

@@ -23,7 +23,10 @@ from __future__ import annotations
 from rclattice import viz
 from rclattice.opensees import run_pushover
 
-from build import beamcolumn_reference_linear, calibrate_area_linear, lattice_k0, rc_lattice_linear
+from build import (
+    beamcolumn_reference_linear, calibrate_area_linear, lattice_k0, modal_calibration_figure,
+    rc_lattice_linear,
+)
 from specimen import DU, OUT, TARGET, lateral_loads
 
 
@@ -59,6 +62,16 @@ def main(*, draw: bool = False) -> None:
         title="LINEAR RC portal frame pushover: lattice vs fiber frame",
     )
     print(f"saved pushover curve to {outdir / 'frame_pushover_linear.png'}")
+
+    # calibration output (D35): first N mode shapes (elastic fiber frame vs lattice) + periods table
+    caption = (f"linear scalar calibration — strut area A={area:.3f} in^2 -> K0={k_lat:.2f} kip/in "
+               f"({(k_lat / k_bc - 1) * 100:+.2f}% vs fiber frame)")
+    modalpath = outdir / "frame_modal_linear.png"
+    t_ref, t_lat = modal_calibration_figure(reference="beamcolumn", lattice_model=model,
+                                            label="elastic fiber frame", caption=caption,
+                                            savepath=str(modalpath), linear=True)
+    print(f"modal calibration: fiber frame T={[f'{t:.4f}' for t in t_ref]} s | "
+          f"lattice T={[f'{t:.4f}' for t in t_lat]} s -> saved {modalpath}")
 
     if draw:
         drawpath = outdir / "frame_pushover_linear_model.png"

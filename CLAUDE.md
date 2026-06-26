@@ -9,7 +9,7 @@ Guidance for working in this repository.
 >
 > **Project state:** the RC **column** and **portal-frame** studies are implemented — pushover +
 > dynamic, nonlinear + linear, lattice vs fiber-`forceBeamColumn` / 2D-continuum references (see the
-> **Status** section below and DECISIONS.md through D34). The original RC-frame pushover benchmark
+> **Status** section below and DECISIONS.md through D35). The original RC-frame pushover benchmark
 > (D18) is implemented — see D18/D19 and the D34 frame rebuild.
 
 ## Project
@@ -120,9 +120,9 @@ level above it (D11).
       mesh.py                     # gmsh grid (nodes + quads) + horizon strut connectivity
       builders.py                 # build_lattice[_rc] / build_continuum[_rc] -> FE Model + lumped mass (D12/D16/D29)
       calibration.py              # lattice area calibration: static + modal periods (D16, scipy)
-      viz.py                      # matplotlib (Agg): deformed shapes, modes, pushover, time-history, --draw models (D17/D32)
+      viz.py                      # matplotlib (Agg): deformed shapes, modes, pushover, time-history, --draw models, modal-calibration figure (D17/D32/D35)
       model.py                    # generic FE Model (Node/Element[+kind]/Uniaxial+NDMaterial/mass/...)
-      opensees.py                 # ONLY module importing openseespy: static/modal/gravity/pushover/dynamic + fiber beam-column refs
+      opensees.py                 # ONLY module importing openseespy: static/modal/gravity/pushover/dynamic + fiber beam-column refs (pushover/dynamic/modal, cantilever + frame; D35)
     tests/                        # pytest (horizon, verification, calibration, rc, pushover, frame, continuum_rc)
     examples/
       column/                     # RC cantilever-column studies (pushover/dynamic, nonlinear/linear, single-element BC)
@@ -209,6 +209,11 @@ Built incrementally; the elastic verification slice and the nonlinear RC studies
 - Modal calibration (D16): density-based lumped tributary mass, `run_modal` (ops.eigen), and
   `calibration.py` fitting orthogonal/diagonal strut areas (bounded, scipy least_squares) to
   the static deflection + first N periods.
+- Calibration output figure (D35): every calibrating run saves a modal figure — the first N mode
+  shapes of the SELECTED reference vs the lattice (reference follows `--reference`: continuum via
+  `run_modal`, or the subdivided fiber `run_beamcolumn_modal` / `run_beamcolumn_frame_modal`) with a
+  per-mode periods table (`T_ref`, `T_lattice`, `Δ vs reference`) underneath. `viz.figure_modal_calibration`;
+  `examples/{column,frame}/build.py:modal_calibration_figure`. Equal-mass, self-mass basis (D16).
 - Frame + visualizer (D17): compound-rectangle geometry (`portal_frame`, joints merged) and
   box-based supports/loads (`BoxSupport`/`BoxLoad`); matplotlib `viz.py` renders deformed
   lattice/continuum side-by-side for static + mode shapes + an animated GIF.

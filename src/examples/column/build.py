@@ -13,9 +13,11 @@ adds a fixed parallel stiffness, so K0 is not proportional to area) via a secant
 
 from __future__ import annotations
 
+from rclattice import viz
 from rclattice.builders import build_continuum_rc, build_lattice, build_lattice_rc, select_nodes
 from rclattice.calibration import calibrate_lattice, continuum_targets
 from rclattice.materials import (
+    concrete_nd_elastic_planestress,
     concrete_nd_nonlinear,
     concrete_uniaxial_elastic,
     concrete_uniaxial_nonlinear,
@@ -23,12 +25,16 @@ from rclattice.materials import (
     steel_uniaxial,
     steel_uniaxial_elastic,
 )
-from rclattice.opensees import run_beamcolumn_cantilever, run_dynamic, run_pushover
+from rclattice.opensees import (
+    run_beamcolumn_cantilever, run_beamcolumn_modal, run_dynamic, run_modal, run_pushover,
+)
 
 from specimen import (
     CORE, COVER_C, DU, EPS, GF, GFC, H, HORIZON, MESH, P, STEEL, TARGET, W,
     column_problem, lateral_loads, longitudinal_rebars, rebars, zone_of,
 )
+
+N_MODES = 3   # first N modal periods drawn + tabulated in the calibration figure (D35)
 
 
 # --- nonlinear models (Concrete02 / Steel02) --------------------------------
@@ -122,6 +128,50 @@ def make_reference(name: str) -> dict:
     if name == "continuum":
         return continuum_reference()
     raise ValueError(f"unknown reference {name!r} (expected 'beamcolumn' or 'continuum')")
+
+
+def modal_calibration_figure(*, reference: str, lattice_model, label: str, caption: str,
+                             savepath: str, linear: bool = False, n_modes: int = N_MODES,
+                             Gf: float = GF, Gfc: float = GFC) -> tuple[list, list]:
+    """Calibration output (D35): draw the first `n_modes` mode shapes of the calibrated lattice and
+    the SELECTED reference, with a periods table underneath, to `savepath`.
+
+    The reference is whatever `--reference` picked: the 2D RC continuum (`run_modal` on
+    `_continuum_model`) or the subdivided fiber beam-column (`run_beamcolumn_modal`). Both are put on
+    a mass-consistent footing with the lattice so the periods are directly comparable — the continuum
+    shares the builder tributary mass by construction (D16); the beam-column is given the lattice's
+    total self-mass. The lattice is the as-built calibrated model (self-mass only, no seismic top
+    mass — the modal basis the calibration itself uses). The fit target stays the continuum (D16), so
+    the table's column is a plain `Δ vs reference`, not a calibration residual. Returns
+    (reference_periods, lattice_periods)."""
+    lat = run_modal(lattice_model, n_modes)
+    lat_total = sum(m[0] for m in lattice_model.masses.values())   # x-direction total mass
+
+    if reference == "continuum":
+        ref_model = (_continuum_model_linear() if linear else _continuum_model(Gf, Gfc))[0]
+        ref = run_modal(ref_model, n_modes)
+    else:  # beamcolumn — subdivided fiber stick, total mass matched to the lattice
+        mats = ((concrete_uniaxial_elastic(CORE, 1), concrete_uniaxial_elastic(COVER_C, 2),
+                 steel_uniaxial_elastic(STEEL, 3)) if linear else
+                (concrete_uniaxial_nonlinear(CORE, 1), concrete_uniaxial_nonlinear(COVER_C, 2),
+                 steel_uniaxial(STEEL, 3)))
+        ref = run_beamcolumn_modal(height=H, materials=mats, nelem=int(round(H / MESH)),
+                                   self_mass=lat_total, num_modes=n_modes)
+        ref_model = ref["model"]
+
+    rows = []
+    for i in range(n_modes):
+        tr, tl = ref["periods"][i], lat["periods"][i]
+        d = 100.0 * (tl - tr) / tr if tr not in (0.0, float("inf")) else float("nan")
+        rows.append((i + 1, tr, tl, d))
+
+    viz.figure_modal_calibration(
+        {"model": ref_model, "shapes": ref["shapes"], "label": label, "color": "C3"},
+        {"model": lattice_model, "shapes": lat["shapes"], "label": "RC lattice", "color": "C0"},
+        rows, caption=caption, savepath=savepath,
+        title=f"Modal calibration: {label} vs RC lattice (first {n_modes} modes)",
+    )
+    return ref["periods"], lat["periods"]
 
 
 def calibrate_area(k_bc: float, *, horizon: float = HORIZON):
@@ -221,3 +271,63 @@ def calibrate_area_linear(k_bc: float, *, tol: float = 5e-4, max_iter: int = 15)
         a0, f0, a1 = a1, f1, a2
         f1 = lattice_k0(a1, ctrl, base) - k_bc
     return a1, ctrl, base
+
+
+# --- linear continuum reference (ElasticIsotropic + PlaneStress quads) ------
+
+def _continuum_model_linear():
+    """Build the LINEAR elastic RC continuum column: ElasticIsotropic+PlaneStress plane-stress quads
+    + elastic rebar struts on the shared nodes. The linear analog of ``_continuum_model``; used by
+    ``--reference continuum`` in the linear pushover and dynamic scripts."""
+    def nd_material_for(zone: str) -> tuple:
+        grade = CORE if zone == "core" else COVER_C
+        return concrete_nd_elastic_planestress(grade, 0)   # tags assigned by the builder
+
+    model, _ = build_continuum_rc(column_problem(CORE), MESH, nd_material_for=nd_material_for,
+                                  zone_of=zone_of, rebars=longitudinal_rebars(),
+                                  rebar_material=steel_uniaxial_elastic)
+    ctrl = select_nodes(model, (-EPS, EPS, H - EPS, H + EPS))[0]
+    base = select_nodes(model, (-W, W, -EPS, EPS))
+    return model, ctrl, base
+
+
+def continuum_reference_linear(*, dU: float = 0.1, target: float = TARGET) -> dict:
+    """LINEAR elastic 2D plane-stress continuum pushover — the continuum reference for the linear
+    pushover study. Same mesh and geometry as the nonlinear continuum but with ElasticIsotropic
+    quads so the curve is a straight line of slope K0."""
+    model, ctrl, base = _continuum_model_linear()
+    return run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
+                        control_dof=1, dU=dU, target=target, base_nodes=base)
+
+
+def continuum_k0_linear() -> float:
+    """Initial lateral stiffness of the LINEAR elastic RC continuum column (one tiny pushover step)
+    — the calibration target when ``--reference continuum`` is used in the linear studies."""
+    model, ctrl, base = _continuum_model_linear()
+    r = run_pushover(model, lateral_loads=lateral_loads(model), control_node=ctrl,
+                     control_dof=1, dU=1e-3, target=1e-3, base_nodes=base)
+    return r["shear"][1] / r["disp"][1]
+
+
+def continuum_dynamic_linear(*, accel, dt_record: float, scale: float,
+                              top_mass: float, dt: float = 0.01) -> dict:
+    """Seismic time-history of the LINEAR elastic RC continuum column — the dynamic continuum
+    reference for ``--reference continuum`` in ``dynamic_linear.py``. Bakes the axial-load
+    tributary seismic mass ``top_mass`` onto the top nodes (same as the lattice) then runs the
+    scaled UniformExcitation via ``run_dynamic``."""
+    model, ctrl, base = _continuum_model_linear()
+    top = select_nodes(model, (-W, W, H - EPS, H + EPS))
+    for nid in top:
+        mx, my = model.masses[nid]
+        model.masses[nid] = (mx + top_mass / len(top), my + top_mass / len(top))
+    return run_dynamic(model, accel=accel, dt_record=dt_record, scale=scale, control_node=ctrl,
+                       control_dof=1, base_nodes=base, dt=dt)
+
+
+def make_reference_linear(name: str) -> dict:
+    """Dispatch the LINEAR verification reference by name: "beamcolumn" or "continuum"."""
+    if name == "beamcolumn":
+        return beamcolumn_reference_linear()
+    if name == "continuum":
+        return continuum_reference_linear()
+    raise ValueError(f"unknown reference {name!r} (expected 'beamcolumn' or 'continuum')")

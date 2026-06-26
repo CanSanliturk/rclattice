@@ -643,3 +643,42 @@ unlogged decision or a skipped number; please confirm.)
   become comparable. **This resolves the mechanical decision D28 left open.**
 - **Status:** accepted (reconstructed). Supersedes the Rayleigh damping noted in D24/D28 (those
   entries left as the historical record).
+
+### D35 — 2026-06-26 — Calibration output: first-N mode-shape figure (reference vs lattice) + periods table
+- **Decision:** every calibrating run now emits a **modal calibration figure** as calibration output —
+  the first `N` (default 3, the existing `n_modes`) **mode shapes** drawn for the SELECTED reference
+  (top row) and the lattice (bottom row), columns = modes 1..N, with a **periods table underneath**
+  (per mode: `T_ref`, `T_lattice`, `Δ vs reference %`). One figure per run; **no CSV** (the figure
+  carries everything — table + a caption with the calibration summary). Scope = **always**: scalar +
+  groups, nonlinear + linear, column + frame (8 entry scripts).
+- **Methodology (settled with the user, in order):**
+  - *Content:* reference + lattice + per-mode Δ. **No MAC** — shapes are compared visually in the
+    panels; periods quantitatively in the table. Pairing is **ascending order** (so for a cantilever
+    the 3rd "mode" is typically the axial mode in BOTH models — visible and self-explanatory).
+  - *Reference = whatever `--reference` selected* ("report whatever is used as reference"): the 2D RC
+    continuum (`run_modal` on `_continuum_model`) or the **subdivided fiber** beam-column / portal
+    frame. The single-element pushover reference can't give a real bending mode, so two new modal
+    runners mirror the *dynamic* discretization: **`run_beamcolumn_modal`** (cantilever) and
+    **`run_beamcolumn_frame_modal`** (portal frame) — nodes at the lattice row/column heights, lumped
+    tributary mass, **no gravity / no top mass** → eigen on the initial-tangent stiffness.
+  - *Fit target stays the continuum (D16, user's call).* So the table column is a plain **`Δ vs
+    reference`**, NOT a calibration residual; the calibration *quality* (fitted areas / RMS / success,
+    or scalar area + K0 match) lives in the figure **caption**. This also sidesteps the plain-continuum
+    (groups fit target) vs RC-continuum (`--reference continuum`) mismatch honestly.
+  - *Mass consistency* (required for comparable periods, D16): equal total mass — the continuum shares
+    the builder tributary mass by construction; the beam-column is given the lattice's total self-mass
+    (column) / the same geometry·ρ per-member self-mass (frame). The lattice modal uses the **as-built
+    self-mass** (the dynamic scripts call it BEFORE adding the seismic top mass `P/g`), matching the
+    modal basis the calibration itself uses.
+- **Mechanics added:** `opensees.run_beamcolumn_modal` / `run_beamcolumn_frame_modal` (eigen +
+  per-node eigenvectors + a lightweight line `Model` for drawing); `viz.figure_modal_calibration`
+  (gridspec mode-shape grid + a `matplotlib` table axes + caption) and `viz.sign_fix` (deterministic
+  per-mode sign — reference and lattice are on different meshes, so `align_sign`'s shared-node-id
+  cross-alignment can't be used); `modal_calibration_figure` in `examples/column/build.py` and
+  `examples/frame/build.py`, wired into all pushover/dynamic (+ linear) entry scripts.
+- **Result (column):** T1 tracks the K0 calibration (~4% vs beam-column scalar; ~6% vs continuum);
+  higher modes diverge more for the beam-column (axial-lattice limitation, D16) and much less for the
+  continuum (~5%). Frame: sway T1 ~5%. The known higher-mode divergence is now *shown*, not hidden.
+- **Status:** implemented + verified (column pushover beamcolumn/continuum, column/frame linear,
+  dynamic in-flow). Backend independence preserved (figure I/O lives in the example layer; `viz`
+  imports no openseespy).
