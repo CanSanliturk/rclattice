@@ -161,7 +161,7 @@ def main(*, stem: str = "wall_cyclic_dynamic") -> None:
     _style(bx, xlim=(-lim_d, lim_d), ylim=(-lim_s, lim_s))
     bx.set_xlabel("drift ratio (%)", fontsize=10, color=INK_2)
     bx.set_ylabel("base shear (kN)", fontsize=10, color=INK_2)
-    bx.set_title("Envelopes — the fair comparison", fontsize=11, color=INK, loc="left", pad=34)
+    bx.set_title("Loop envelopes", fontsize=11, color=INK, loc="left", pad=34)
 
     # peak values as direct labels in the empty upper-left quadrant — no box, nothing to collide with
     for y, text, color in ((0.94, f"model peak  {m_peak:.0f} kN", MODEL_C),
@@ -182,8 +182,8 @@ def main(*, stem: str = "wall_cyclic_dynamic") -> None:
              f"{m_peak / t_peak:.2f}x push, {m_peak_n / t_peak_n:.2f}x pull.",
              fontsize=9.5, color=INK_2, ha="left")
     fig.text(0.055, 0.831,
-             "Loop SHAPE is not a fair target: 74% of the test's drift is plain-bar "
-             "debonding/rocking, which this perfect-bond lattice cannot represent.",
+             "Reported deformation split at 2% drift: 74% rocking on debonded plain bars, 20% "
+             "flexure, 4% shear. Bond is perfect in this model, so rocking is absent.",
              fontsize=9.5, color=INK_2, ha="left")
 
     savepath = OUT / f"{stem}_vs_test.png"
