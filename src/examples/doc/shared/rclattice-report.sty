@@ -1,0 +1,29 @@
+% Shared preamble for rclattice model/analysis reports.
+% Usage:  \usepackage{rclattice-report}   (build.sh puts shared/ on TEXINPUTS)
+\ProvidesPackage{rclattice-report}[2026/08/16 rclattice report style]
+
+\RequirePackage[margin=22mm]{geometry}
+\RequirePackage{booktabs}
+\RequirePackage{tabularx}
+\RequirePackage{ltablex}
+\RequirePackage{graphicx}
+\RequirePackage{amsmath}
+\RequirePackage[table]{xcolor}
+\RequirePackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+\RequirePackage{titlesec}
+\RequirePackage{parskip}
+\RequirePackage{caption}
+\RequirePackage{url}
+\keepXColumns
+
+\definecolor{hdr}{HTML}{1F3864}
+\titleformat{\section}{\normalfont\Large\bfseries\color{hdr}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{hdr}}{\thesubsection}{0.6em}{}
+\captionsetup{font=small,labelfont=bf}
+\renewcommand{\arraystretch}{1.15}
+
+\newcommand{\unit}[1]{\,\textrm{#1}}
+% the three table shapes the reports use
+\newenvironment{spectable}{\tabularx{\textwidth}{@{}p{50mm}p{38mm}X@{}}}{\endtabularx}
+\newenvironment{deftable}{\tabularx{\textwidth}{@{}p{46mm}X@{}}}{\endtabularx}
+\newenvironment{numtable}[1]{\begin{center}\small\tabular{#1}}{\endtabular\end{center}}

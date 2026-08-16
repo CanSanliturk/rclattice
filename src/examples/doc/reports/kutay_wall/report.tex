@@ -1,0 +1,412 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{rclattice-report}
+
+% paths resolve from doc/, which is where build.sh runs pdflatex
+\graphicspath{{../output/wall/}{reports/kutay_wall/figures/}}
+
+
+\title{\vspace{-14mm}\textbf{Kutay's Wall}\\[2mm]
+\large Lattice Model, Cyclic Analysis Parameters and Results\\[1mm]
+\normalsize Reversed-cyclic analysis to 4.0\% drift ratio}
+\author{\normalsize \texttt{rclattice} --- \texttt{examples/wall/}}
+\date{\normalsize \today}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\section*{Specimen}
+
+Specimen SW-NC-FF from Şahinkaya, Binbir, Orakcal \& Ilki (2025), \emph{Behavior of Nonconforming
+Flexure-Controlled RC Structural Walls Under Reversed Cyclic Lateral Loading}, \emph{Buildings}
+\textbf{15}, 4501. Full-scale nonconforming flexure-controlled structural wall with low-strength
+concrete, plain longitudinal reinforcement and no boundary confinement.
+
+Unit system throughout: \textbf{N, mm, MPa, s}.
+
+\section{Geometry}
+
+\begin{tabularx}{\textwidth}{@{}p{50mm}p{38mm}X@{}}
+\toprule
+\textbf{Quantity} & \textbf{Value} & \textbf{Note} \\
+\midrule
+Wall length $l_w$ (in-plane)      & 1000\unit{mm}          & \\
+Wall height $h_w$                 & 3000\unit{mm}          & $h_w/l_w = 3.0$ \\
+Wall thickness $t_w$ (out-of-plane) & 200\unit{mm}         & \\
+Shear span $a$                    & 2200\unit{mm}          & lateral load height above the W--P interface; $a/l_w = 2.2$ \\
+Pedestal                          & $1900 \times 600$\unit{mm} & 800\unit{mm} thick out-of-plane \\
+Upper section (loading head)      & $y = 2000$--$3000$\unit{mm} & higher-strength third concrete cast \\
+Model origin                      & $x=0$ at wall mid-length, $y=0$ at the wall--pedestal interface & \\
+\bottomrule
+\end{tabularx}
+
+The domain is a compound of two axis-aligned rectangles --- pedestal $(-950,-600)$ to $(950,0)$ and
+wall $(-500,0)$ to $(500,3000)$ --- meshed separately and merged at coincident nodes, so the
+wall--pedestal interface is continuous.
+
+\section{Discretization}
+
+\begin{tabularx}{\textwidth}{@{}p{50mm}p{38mm}X@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Note} \\
+\midrule
+Mesh size $d$          & 50\unit{mm}   & divides every reinforcement coordinate \\
+Node generation        & gmsh, structured transfinite grid & one node source for the whole domain \\
+Horizon $\delta$       & $1.5\,d = 75$\unit{mm} & 8 neighbours per interior node \\
+Strut connectivity     & every node pair with separation $\le \delta$, deduplicated & orthogonal ($d$) + diagonal ($d\sqrt2$) \\
+Element type           & \texttt{Truss} (2-node, translational DOF only) & \\
+Degrees of freedom     & $ndm = ndf = 2$ & \\
+Nodes                  & 1767 & \\
+Concrete struts        & 6736 & \\
+Reinforcement struts   & 896  & \\
+Uniaxial materials     & 10   & concrete deduplicated by (zone, strut length) \\
+\bottomrule
+\end{tabularx}
+
+Strut lengths present on the regular grid are $d = 50$\unit{mm} (orthogonal) and
+$d\sqrt2 = 70.71$\unit{mm} (diagonal).
+
+\section{Strut-area calibration}
+
+Strut areas are set by the overlapping-lattice energy balance of Aydın (2017), \emph{Overlapping
+lattice modeling for concrete fracture simulations using sequentially linear analysis}, MSc thesis,
+METU, Section 2.2, Equations 2.1--2.3. An affine strain field is imposed, the continuum's stored
+elastic energy is equated to the lattice's evaluated with $EA = 1$, and the uniform axial rigidity
+follows as $EA_t = W_{\text{continuum}} / W_{\text{lattice}}$. The affine field makes every strut
+elongation exact, so no finite element solve and no reference model is involved.
+
+\begin{tabularx}{\textwidth}{@{}p{50mm}p{38mm}X@{}}
+\toprule
+\textbf{Quantity} & \textbf{Value} & \textbf{Note} \\
+\midrule
+Calibrated strut area $A_t$      & 6042.9\unit{mm$^2$} & uniform, all concrete struts \\
+Normalised                       & $0.6043 \times (t_w \cdot d)$ & $t_w \cdot d = 10\,000$\unit{mm$^2$} \\
+Poisson ratio used in Eq. 2.1    & 0.20 & specimen value \\
+Lattice's self-consistent $\nu$  & 0.1796 & where the normal-strain and pure-shear balances agree \\
+Shear-stiffness error at $\nu=0.20$ & 2.49\% & \\
+Grid anisotropy $|A_x - A_y|/A_x$ & 1.90\% & \\
+Calibration patch                & wall rectangle $1000 \times 3000$\unit{mm} & pedestal excluded \\
+\bottomrule
+\end{tabularx}
+
+$A_t$ is independent of $E$, so the single value applies to all three concrete zones; each zone's
+modulus is carried by its material. $A_t/(t_w d)$ is a constant of the ($\delta$, $\nu$) lattice.
+
+\section{Material models}
+
+\subsection{Concrete --- \texttt{Concrete02}, crack-band regularized}
+
+Concrete struts use \texttt{Concrete02} with both softening branches sized from the strut length
+$L$, holding the fracture energy per unit crack area constant:
+\[
+E_{ts} = \frac{f_t^2 L}{2 G_f} \ \ (\text{capped at } 0.5E), \qquad
+\varepsilon_U = \varepsilon_{c0} + \frac{2 G_{fc}}{(f_c + f_{cu})L}, \qquad
+G_{fc} = 250\,G_f .
+\]
+The residual crushing strength is floored at $0.2 f_c$. Tensile fracture energies follow CEB-FIP
+MC90, $G_f = 0.030 (f_{cm}/10)^{0.7}$ with 16\unit{mm} maximum aggregate.
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+\textbf{Zone} & $E$ & $f_c$ & $\varepsilon_{c0}$ & $f_{cu}$ & $f_t$ & $G_f$ \\
+ & (MPa) & (MPa) & (--) & (MPa) & (MPa) & (N/mm) \\
+\midrule
+Test unit ($0 \le y < 2000$)   & 16\,100 & 15.1 & 0.0022 & 4.0  & 1.5 & 0.053 \\
+Upper section ($y \ge 2000$)   & 26\,400 & 43.4 & 0.0025 & 10.0 & 3.3 & 3.3\,/\,0.093 \\
+Pedestal ($y < 0$)             & 93\,600 & \multicolumn{5}{l}{linear \texttt{Elastic}; see \S\ref{sec:ideal}} \\
+\bottomrule
+\end{tabular}\end{center}
+
+Emitted \texttt{Concrete02} arguments $(f_{pc}, \varepsilon_{c0}, f_{pcu}, \varepsilon_U, \lambda,
+f_t, E_{ts})$, per zone and strut length (compression negative):
+
+\begin{center}\small
+\begin{tabular}{@{}llrrrrrrr@{}}
+\toprule
+\textbf{Zone} & $L$ (mm) & $f_{pc}$ & $\varepsilon_{c0}$ & $f_{pcu}$ & $\varepsilon_U$ & $\lambda$ & $f_t$ & $E_{ts}$ \\
+\midrule
+Test unit & 50.00 & $-15.10$ & $-0.00220$ & $-4.00$  & $-0.02995$ & 0.1 & 1.50 & 1061.3 \\
+Test unit & 70.71 & $-15.10$ & $-0.00220$ & $-4.00$  & $-0.02182$ & 0.1 & 1.50 & 1500.9 \\
+Upper     & 50.00 & $-43.40$ & $-0.00250$ & $-10.00$ & $-0.01992$ & 0.1 & 3.30 & 2927.4 \\
+Upper     & 70.71 & $-43.40$ & $-0.00250$ & $-10.00$ & $-0.01481$ & 0.1 & 3.30 & 4140.0 \\
+\bottomrule
+\end{tabular}\end{center}
+
+\subsection{Reinforcement --- \texttt{Steel02}}
+
+Arguments $(f_y, E_0, b, R_0, c_{R1}, c_{R2})$ with $R_0 = 18.0$, $c_{R1} = 0.925$,
+$c_{R2} = 0.15$. The strain-hardening ratio $b$ is computed from the measured tensile properties of
+the paper's Table 2 as $b = (f_{max} - f_y)\,/\,[E_s(\varepsilon_{max} - \varepsilon_y)]$.
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrrrl@{}}
+\toprule
+\textbf{Bar} & $f_y$ (MPa) & $E_0$ (MPa) & $b$ & $f_{max}$ (MPa) & $\varepsilon_{max}$ & \textbf{Use} \\
+\midrule
+$\phi14$ & 294 & 198\,600 & 0.0024 & 396 & 21.4\% & boundary longitudinal \\
+$\phi12$ & 311 & 230\,300 & 0.0021 & 414 & 21.0\% & web vertical \\
+$\phi10$ & 340 & 216\,600 & 0.0019 & 425 & 21.3\% & web horizontal \\
+$\phi16$ & 294 & 198\,600 & 0.0024 & --- & --- & loading head ($\phi$14 properties used) \\
+\bottomrule
+\end{tabular}\end{center}
+
+\section{Reinforcement layout}
+
+Two reinforcement curtains (front and back) are collapsed onto one in-plane line, so each modelled
+bar line carries both curtains' area. Reinforcement shares lattice nodes with the concrete
+(perfect bond).
+
+\begin{tabularx}{\textwidth}{@{}p{34mm}p{40mm}r>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Family} & \textbf{Position} & \textbf{Area (mm$^2$)} & \textbf{Detail} \\
+\midrule
+Boundary longitudinal & $x = \pm450$\unit{mm} & 615.75 & 4$\phi$14, lumped at the boundary-region centroid \\
+Web vertical          & $x = \pm100, \pm300$\unit{mm} & 226.19 & 2$\phi$12 @ 200\unit{mm} \\
+Web horizontal        & $y = 0, 200, \dots, 3000$\unit{mm} & 157.08 & 2$\phi$10 @ 200\unit{mm}, full width \\
+Loading head          & $y = 2500, \dots, 3000$\unit{mm} & 402.12 & 2$\phi$16 @ 100\unit{mm} \\
+Boundary confinement  & --- & --- & none; $\rho_{con}$ = ``NC'' for this specimen \\
+\bottomrule
+\end{tabularx}
+
+Vertical bars are anchored into the pedestal: each runs down to $y = -500$\unit{mm} and turns
+$300$\unit{mm} outward, away from the wall centreline, reproducing the hooked anchorage of the
+specimen drawings.
+
+Reinforcement ratios: $\rho_v = 2A_{\phi12}/(t_w s) = 0.566\%$;
+$\rho_t = 2A_{\phi10}/(t_w s) = 0.393\%$; boundary region 10\% of $l_w$.
+
+\section{Boundary conditions and loading}
+
+\begin{tabularx}{\textwidth}{@{}p{46mm}X@{}}
+\toprule
+\textbf{Item} & \textbf{Definition} \\
+\midrule
+Support        & all nodes on the pedestal soffit $y = -600$\unit{mm} fixed in both translations \\
+Axial load     & 600\unit{kN} compression, distributed over the wall top edge $y = 3000$\unit{mm} \\
+Axial load ratio & $0.20\,A_g f_c'$ \\
+Lateral drive  & all nodes on the row $y = 2200$\unit{mm}, imposed horizontal displacement \\
+Control node   & $(x,y) = (0, 2200)$\unit{mm} \\
+Drift ratio    & control displacement divided by 2200\unit{mm} \\
+Base shear     & $-\sum$ horizontal reactions over the pedestal soffit nodes \\
+\bottomrule
+\end{tabularx}
+
+Gravity is applied first in 10 \texttt{LoadControl} increments and then held constant
+(\texttt{loadConst}) for the whole cyclic stage.
+
+\section{Loading protocol}
+
+The specimen's protocol (paper Fig. 9, after ACI 374.2R-13): three cycles at each level up to the
+yield displacement and two at every level after it. Amplitudes are measured at the actuator level,
+$y = 2200$\unit{mm}.
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrrrrrrrrr@{}}
+\toprule
+Drift ratio (\%) & 0.10 & 0.20 & 0.30 & 0.50 & 0.75 & 1.00 & 1.50 & 2.00 & 2.50 & 3.00 & 4.00 \\
+Amplitude (mm)   & 2.2 & 4.4 & 6.6 & 11.0 & 16.5 & 22.0 & 33.0 & 44.0 & 55.0 & 66.0 & 88.0 \\
+Cycles           & 3 & 3 & 2 & 2 & 2 & 2 & 2 & 2 & 2 & 2 & 2 \\
+\bottomrule
+\end{tabular}\end{center}
+
+Totals: 11 levels, 24 cycles, 49 reversals, 2818\unit{mm} of accumulated displacement path.
+
+\section{Solution procedure}
+
+The cyclic response is traced by dynamic relaxation: a quasi-static transient solve in which the
+displacement history is imposed through single-point constraints and the drive is slow enough that
+inertial and damping contributions to the recorded reactions are negligible.
+
+\begin{tabularx}{\textwidth}{@{}p{50mm}p{38mm}X@{}}
+\toprule
+\textbf{Setting} & \textbf{Value} & \textbf{Note} \\
+\midrule
+Analysis type         & \texttt{Transient} & \\
+Displacement history  & \texttt{Path} time series, imposed via \texttt{sp} constraints & one continuous solve across all reversals \\
+Drive rate            & 7.6\unit{mm/s}, constant & \\
+Fundamental period $T_1$ & 0.0240\unit{s} & from \texttt{eigen}, gravity-held tangent \\
+Time step $\Delta t$  & $T_1/30 = 8.0\times10^{-4}$\unit{s} & \\
+Total steps           & 463\,534 & \\
+Integrator            & \texttt{HHT}, $\alpha = 0.7$ & numerical damping of high-frequency content \\
+Damping               & Rayleigh, $\zeta = 0.8$ & $\alpha_M = \zeta\omega_1 = 209.4$, $\beta_{K,\text{init}} = \zeta/\omega_1 = 3.056\times10^{-3}$ \\
+Damping stiffness     & \textbf{initial} stiffness ($\beta_{K,\text{init}}$), not the current tangent & \\
+System                & \texttt{BandGeneral} & \\
+Numberer              & \texttt{RCM} & \\
+Constraints           & \texttt{Transformation} & \\
+Convergence test      & \texttt{NormDispIncr}, tol $10^{-5}$, 50 iterations & \\
+Primary algorithm     & \texttt{Newton} & \\
+Fallback algorithms   & \texttt{KrylovNewton}, then \texttt{NewtonLineSearch} & retried at $\Delta t/10$ over 10 sub-steps \\
+\bottomrule
+\end{tabularx}
+
+\texttt{wipeAnalysis} is called after the gravity stage and before the transient integrator is set;
+the solver (constraints, numberer, system) is then re-declared. Without this the gravity stage's
+static analysis remains active and the transient integrator is not accepted.
+
+The drive rate is specified directly rather than derived from a number of fundamental periods to
+the target amplitude, so that the speed is independent of the protocol's amplitude. At
+7.6\unit{mm/s} the recorded peak base shear reproduces that of the static displacement-controlled
+solver to within 1\% at 0.10\% drift.
+
+\section{Idealizations}\label{sec:ideal}
+
+\begin{tabularx}{\textwidth}{@{}p{46mm}X@{}}
+\toprule
+\textbf{Item} & \textbf{Treatment} \\
+\midrule
+Pedestal thickness & 800\unit{mm} against the wall's 200\unit{mm}. A plane model carries one
+thickness, so the pedestal's extra width is folded into an equivalent modulus,
+$E \times 800/200 = 93\,600$\unit{MPa}. \\
+Pedestal material & linear elastic throughout. \\
+Boundary bar group & 4$\phi$14 lumped at the group centroid, preserving the first moment of the
+group about the section. \\
+Reinforcement curtains & two curtains collapsed onto one in-plane line at double area. \\
+Hoop geometry & only in-plane legs are representable in a 2D in-plane model; legs running through
+the thickness are out of plane. \\
+Bond & perfect; reinforcement shares lattice nodes with the concrete. \\
+Bar buckling and fracture & not represented by \texttt{Steel02}. \\
+Concrete compression & \texttt{Concrete02} crushing backbone. A selectable mode replaces it with an
+unbounded elastic branch, matching the assumption of the cited calibration method, in which
+compression is not calibrated. \\
+\bottomrule
+\end{tabularx}
+
+\section{Outputs}
+
+Recorded at every converged step: control-node displacement and base shear. Written to
+\path{examples/output/wall/}:
+
+\small
+\begin{tabularx}{\textwidth}{@{}p{62mm}X@{}}
+\toprule
+\textbf{File} & \textbf{Content} \\
+\midrule
+\texttt{wall\_cyclic\_dynamic.png} & hysteresis loops, measured response, overlay \\
+\texttt{wall\_cyclic\_dynamic\_backbone.png} & loop envelope against the measured backbone \\
+\texttt{wall\_cyclic\_dynamic\_vs\_test.png} & loops and envelopes against the \emph{digitized} test response \\
+\texttt{wall\_cyclic\_dynamic\_data.json} & raw drift and base-shear arrays \\
+\texttt{wall\_drawing.png} & lattice model elevation and interface detail \\
+\bottomrule
+\end{tabularx}
+\normalsize
+
+The digitized test response is kept with the study rather than the output, at
+\path{examples/wall/data/swncff_fig14b.npz}, since it is an input to the comparison and does not
+change when the analysis is re-run.
+
+Measured reference values for this specimen: peak lateral load $+212.6\,/\,-209.4$\unit{kN} at
+$\pm1.00\%$ drift; first bar yield at 0.30\% drift; idealized yield drift 0.35\%; ultimate drift
+1.50\%; displacement ductility 4.3; strength degradation 35\% at 4.0\% drift.
+
+\begin{center}
+\includegraphics[width=0.96\textwidth]{wall_drawing.png}
+\captionof{figure}{Lattice model of Kutay's wall: full elevation and wall--pedestal interface.}
+\end{center}
+
+\section{Results}
+
+The analysis completed all 49 reversals of the 4.0\% protocol, 463\,534 steps in 7.1\unit{h},
+converged throughout.
+
+\subsection{Digitization of the measured response}
+
+The measured hysteresis is taken from Figure 14b of the source paper (specimen SW-NC-FF). The page
+is rendered at 400\unit{dpi}, the plot frame is located from its own axis rules, and the test curve
+is separated from the damage markers by colour, giving 64\,414 points in (drift ratio, lateral
+load). Both the model and the digitized response use the same shear span, 2200\unit{mm}, so the two
+overlay without rescaling.
+
+The extraction is self-checking: the digitized extremes are $+210.6\,/\,-211.8$\unit{kN} against
+the reported $+212.6\,/\,-209.4$\unit{kN}, a 1.0\% and 1.2\% difference, against a plotted line
+thickness worth roughly 3\unit{kN}. What is recovered is a point \emph{cloud}, not an ordered path:
+overlapping loops cannot be re-sequenced from pixels. Per-cycle quantities --- dissipated energy,
+cycle-to-cycle degradation, unloading stiffness --- are therefore not available from this source,
+and the cloud is plotted with markers rather than joined by lines.
+
+A backbone is nonetheless recoverable as a \emph{loop-tip envelope}. At each protocol drift level
+$d$ the extreme load is taken over the slice $[0.90d,\ 1.05d]$. The slice must reach slightly
+inside the extreme because a degrading wall peaks just before its peak displacement, so at the tip
+proper the load has already come off by a few percent. The inner reach of 10\% is the widest that
+still excludes the reloading branches of \emph{larger} loops passing through the same slice: at
+15\% the 3.0\% level jumps from 152 to 174\unit{kN}, which belongs to the 4\% cycle. A plain
+per-drift-bin maximum is not usable, because the pinched loops cross near the origin and would
+report 180\unit{kN} at 0.3\% drift from cycles many times larger.
+
+\subsection{Peak strength}
+
+\begin{tabularx}{\textwidth}{@{}p{46mm}p{34mm}p{30mm}X@{}}
+\toprule
+\textbf{Quantity} & \textbf{Push} & \textbf{Pull} & \textbf{Note} \\
+\midrule
+Model peak base shear      & $+227.2$\unit{kN} & $-221.5$\unit{kN} & at $+0.36\%$ / $-0.30\%$ drift \\
+Test, digitized            & $+209.9$\unit{kN} & $-211.8$\unit{kN} & at $\pm1.00\%$ / $-1.50\%$ drift \\
+Test, as reported          & $+212.6$\unit{kN} & $-209.4$\unit{kN} & at $\pm1.00\%$ drift \\
+Model / test               & 1.08 & 1.05 & against the digitized peaks \\
+\bottomrule
+\end{tabularx}
+
+Peak strength is the comparison this model is entitled to make: it follows from section
+equilibrium --- bar areas, $f_y$, $f'_c$, axial load and lever arm --- which perfect bond barely
+moves. It is met within 8\%.
+
+\subsection{Envelope, level by level}
+
+Model envelope against the digitized loop-tip envelope, at each protocol drift level (kN):
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+Drift ratio (\%) & 0.30 & 0.50 & 0.75 & 1.00 & 1.50 & 2.00 & 2.50 & 3.00 & 4.00 \\
+\midrule
+Model, push      & 218.3 & 208.7 & 207.1 & 202.2 & 184.7 & 187.5 & 185.7 & 179.1 & 189.6 \\
+Test, push       & 165.5 & 203.7 & 204.3 & 209.9 & 207.4 & 202.4 & 174.9 & 152.4 & 141.7 \\
+Model / test     & 1.32 & 1.02 & 1.01 & 0.96 & 0.89 & 0.93 & 1.06 & 1.18 & 1.34 \\
+\midrule
+Model, pull      & $-212.9$ & $-211.0$ & $-209.5$ & $-205.3$ & $-200.2$ & $-188.5$ & $-183.7$ & $-178.7$ & $-182.7$ \\
+Test, pull       & $-163.0$ & $-199.9$ & $-201.8$ & $-209.9$ & $-211.8$ & $-196.8$ & $-171.8$ & $-145.5$ & $-134.2$ \\
+Model / test     & 1.31 & 1.06 & 1.04 & 0.98 & 0.95 & 0.96 & 1.07 & 1.23 & 1.36 \\
+\bottomrule
+\end{tabular}\end{center}
+
+Between 0.50\% and 2.00\% drift the two envelopes agree to within 11\%, and over 0.50--1.00\% to
+within 6\%. The disagreement is concentrated at the two ends, and each end has a specific cause.
+
+\subsection{Interpretation}
+
+\begin{tabularx}{\textwidth}{@{}p{50mm}X@{}}
+\toprule
+\textbf{Observation} & \textbf{Reading} \\
+\midrule
+Peak strength within 8\% & The fair comparison, and it is met. \\
+Model reaches its peak at 0.36\% drift, the test at 1.00\% &
+The clearest signature of perfect bond. With the bars tied to the concrete at shared nodes they
+strain more per unit drift, so the section reaches capacity earlier and the model runs stiffer
+after cracking. This was predicted from the idealization before the run, not diagnosed after it,
+and it is the model behaving correctly given its assumptions. \\
+Overstrength of 1.32 at 0.30\% drift &
+The same effect seen at a fixed drift instead of at the peak: the model is already near capacity
+where the test is still climbing. \\
+No post-peak degradation; 1.34 over-prediction at 4.0\% drift &
+The largest discrepancy in the study, and larger than the peak error. The measured degradation is
+driven by longitudinal bar buckling and concrete core crushing, neither of which
+\texttt{Steel02} nor a perfect-bond lattice reproduces (Section~\ref{sec:ideal}). \\
+Loops much fatter than measured &
+The test loops are strongly pinched and self-centering because 74\% of the tip displacement at
+2\% drift comes from rocking on debonded plain bars. That mechanism is absent here by construction,
+so loop shape, energy dissipation, pinching and drift capacity are reported for completeness and
+are not targets. \\
+\bottomrule
+\end{tabularx}
+
+The drive is displacement-controlled and the protocol closes at zero, so the end-of-run
+displacement is imposed rather than computed; it is not evidence about self-centering either way.
+
+\begin{center}
+\includegraphics[width=\textwidth]{wall_cyclic_dynamic_vs_test.png}
+\captionof{figure}{Lattice response against the digitized SW-NC-FF test hysteresis. Left: loops
+overlaid, the test drawn as a point cloud. Right: the loop envelopes, where strength is
+comparable.}
+\end{center}
+
+\end{document}

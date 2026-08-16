@@ -27,6 +27,9 @@ htmlcov/
 # Generated outputs (re-run examples to regenerate)
 src/examples/output/
 
+# Built report PDFs (rebuild with examples/doc/build.sh)
+src/examples/doc/out/
+
 # Gmsh mesh files
 *.msh
 *.geo_unrolled

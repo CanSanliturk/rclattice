@@ -52,4 +52,8 @@ def rebar_node_chain(coords: np.ndarray, path, tol: float = 1e-6) -> list[int]:
         if i not in seen:
             seen.add(i)
             ordered.append(i)
+    if len(ordered) < 2:
+        raise ValueError(f"rebar path {path} matched only {len(ordered)} lattice node(s) (tol={tol}); "
+                         "a bar needs at least two to form a strut — the mesh is not aligned to the "
+                         "rebar path")
     return ordered

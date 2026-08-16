@@ -119,14 +119,29 @@ level above it (D11).
       reinforcement.py            # map a Rebar polyline onto the lattice node chain (D13)
       mesh.py                     # gmsh grid (nodes + quads) + horizon strut connectivity
       builders.py                 # build_lattice[_rc] / build_continuum[_rc] -> FE Model + lumped mass (D12/D16/D29)
-      calibration.py              # lattice area calibration: static + modal periods (D16, scipy)
+      calibration.py              # TWO calibration routes: structural fit to static+modal (D16, scipy)
+                                  #   and Aydin's OLM energy balance -> uniform strut area (D47, no FE solve)
       viz.py                      # matplotlib (Agg): deformed shapes, modes, pushover, time-history, --draw models, modal-calibration figure (D17/D32/D35)
       model.py                    # generic FE Model (Node/Element[+kind]/Uniaxial+NDMaterial/mass/...)
-      opensees.py                 # ONLY module importing openseespy: static/modal/gravity/pushover/dynamic + fiber beam-column refs (pushover/dynamic/modal, cantilever + frame; D35)
+      opensees.py                 # ONLY module importing openseespy: static/modal/gravity/pushover/
+                                  #   cyclic/dynamic + fiber beam-column refs (pushover/dynamic/modal,
+                                  #   cantilever + frame; D35). Cyclic: cyclic_protocol + run_cyclic
+                                  #   (D48) and run_cyclic_dynamic (dynamic relaxation, D49)
     tests/                        # pytest (horizon, verification, calibration, rc, pushover, frame, continuum_rc)
     examples/
+      cube/                       # plain-concrete 0.1 m cube: uniaxial-tension coupon, lattice vs single dispBeamColumn (D37); clean staged rebuild — elastic baseline (elastic.py, D42/D43) then plastic pushover (plastic.py, ModifiedNewton -initial, D44)
       column/                     # RC cantilever-column studies (pushover/dynamic, nonlinear/linear, single-element BC)
       frame/                      # portal-frame studies (column + thinner beam; pushover/dynamic +/- linear; SI modal visualize)
+      wall/                       # "Kutay's wall" — flexure-controlled RC shear wall on its pedestal
+                                  #   (Sahinkaya et al. 2025 SW-NC-FF), calibrated by Aydin's OLM energy
+                                  #   balance (D47). specimen/build/draw + elastic.py (D47), pushover.py,
+                                  #   cyclic.py (reversed-cyclic to 4% drift, D48/D49), digitize.py
+                                  #   (test loops from paper Fig. 14b -> data/*.npz, D51), replot.py and
+                                  #   compare.py (redraw from saved JSON — never re-run the analysis)
+      katrin_wall/                # "Katrin's wall" — WSH3 (Dazio, Beyer & Bachmann 2009); specimen +
+                                  #   build + draw + summary only, no analysis yet
+      doc/                        # LaTeX reports: build.sh, shared/ preamble, reports/<study>/report.tex
+                                  #   (column, kutay_wall, katrin_wall); PDFs -> doc/out/ (not committed)
 ```
 
 Working today: the shared `Problem` + material mapping (elastic + nonlinear) + builders
@@ -247,9 +262,40 @@ Built incrementally; the elastic verification slice and the nonlinear RC studies
   beam forms a local mechanism the static pushover can't trace), opt-in `--nonlinear-beam`;
   `visualize.py` keeps the separate SI modal lattice-vs-continuum study.
 
-Tests: `src/tests/` (horizon, verification, calibration, rc, pushover, frame, continuum_rc) — 25 pass
-and one known-failing (`test_rc.py::test_nonlinear_pushover_runs_and_yields`, the thin-nonlinear-beam
-lattice instability, D34).
+- RC shear wall (D47, `examples/wall/`): the Sahinkaya et al. (2025) SW-NC-FF nonconforming
+  flexure-controlled wall (3000x1000x200) standing on its 1900x600 pedestal, three concrete casts as
+  zones, two reinforcement curtains collapsed onto in-plane bar lines. **Calibrated by Aydin's (2017)
+  overlapping-lattice energy balance** — a homogenization, not a structural fit: equate continuum and
+  lattice stored energy under an affine strain field and solve for one uniform `EA`. No FE solve, no
+  reference model, no optimiser. The calibrated AREA is E-independent (one value serves every zone)
+  and mesh-objective. Key correction to the cited method: with a single `EA_t` the horizon=1.5 lattice
+  is isotropic at **nu = 0.18**, not Aydin's stated 1/3 (which overshoots shear stiffness 19%);
+  `EnergyBalanceResult` reports it. Elastic result matches a transformed-section cantilever to ~1%
+  (clamped base); the pedestal accounts for a further 6.5%. NOTE the specimen's real mechanism is
+  rocking from PLAIN-bar debonding, which a perfect-bond lattice cannot represent (see the scope
+  caveat below).
+
+- RC shear wall, NONLINEAR cyclic (D48–D52, `examples/wall/cyclic.py`): the same Aydin-calibrated
+  strut areas driven through the test's own protocol (paper Fig. 9) to 4% drift. A static
+  path-follower stalls near 0.3% drift on a cracking lattice, so the run uses **dynamic relaxation**
+  (`run_cyclic_dynamic`, D49) — drive rate set DIRECTLY in mm/s (7.6 reproduces the static solver
+  within 1%), Rayleigh damping on `betaKinit` never `betaK`, and `ops.wipeAnalysis()` before the
+  transient integrator. Full 4% run: 463,534 steps, ~7.1 h, converged. `digitize.py` extracts the
+  measured LOOPS from paper Fig. 14b (a point cloud, not an ordered path — no per-cycle energy);
+  `compare.py` overlays model vs test and derives the test backbone as a loop-tip envelope.
+  **Results:** peak base shear model +227/−221 kN vs digitized test +210/−212 → **1.08x / 1.05x**;
+  envelopes agree within 11% over 0.5–2.0% drift. Two systematic gaps, both predicted by the
+  idealization: the model peaks at **0.36% drift vs the test's 1.00%** and over-strengths 1.32x at
+  0.3% (perfect bond → bars strain more per unit drift → earlier yield, stiffer after cracking), and
+  it shows **no post-peak degradation** (1.34x at 4% drift; `Steel02` has no bar buckling, and the
+  test's degradation is bar-buckling + core crushing). **SCOPE: strength, stiffness and damage
+  location are fair comparisons; drift capacity, pinching, self-centering and energy dissipation are
+  NOT** — 74% of the test's drift at 2% is rocking on debonded plain bars, absent by construction.
+  Written up in `examples/doc/reports/kutay_wall/report.tex`.
+
+Tests: `src/tests/` (horizon, verification, calibration, energy_balance, rc, pushover, frame,
+continuum_rc) — 35 pass and one known-failing (`test_rc.py::test_nonlinear_pushover_runs_and_yields`,
+the thin-nonlinear-beam lattice instability, D34).
 
 Not yet: gmsh `embed` discrete bars in the continuum; 3D solids, shells, a packaged BeamColumnBuilder
 (fiber refs live as `run_beamcolumn_*` in `opensees.py`); a dedicated results layer.

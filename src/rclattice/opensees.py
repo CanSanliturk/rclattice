@@ -136,6 +136,7 @@ def run_pushover(
     base_nodes=None,
     tol: float = 1e-5,
     max_iter: int = 100,
+    algorithm: "tuple[str, ...]" = ("Newton",),
     element_groups=None,
 ) -> dict:
     """Gravity (constant) → DisplacementControl pushover, recording base shear (D18/D19).
@@ -148,9 +149,16 @@ def run_pushover(
 
     Base shear is `-sum(reaction[control_dof])` over `base_nodes` (defaults to the supported
     nodes) — the structure's resistance, positive for a positive push. A failed step is retried
-    with finer sub-steps and a stronger algorithm (Newton → KrylovNewton) before giving up — the
-    Stage-2 nonlinear lattice (Concrete02 softening) needs this. `tol`/`max_iter` set the
-    NormDispIncr test (1e-6 is the practical tolerance for the softening lattice).
+    with finer sub-steps and a stronger algorithm (the `algorithm` primary → KrylovNewton →
+    NewtonLineSearch) before giving up — the Stage-2 nonlinear lattice (Concrete02 softening) needs
+    this. `tol`/`max_iter` set the NormDispIncr test (1e-6 is the practical tolerance for the
+    softening lattice).
+
+    `algorithm` is the PRIMARY solution algorithm (an `ops.algorithm(*algorithm)` arg tuple), used
+    for normal stepping and as the first rung of the retry ladder; it defaults to `("Newton",)`. For
+    a plastic/softening pushover pass `("ModifiedNewton", "-initial")` — iterating on the constant
+    INITIAL (elastic) stiffness never re-forms the singular/negative cracked tangent that trips full
+    Newton, so it is the robust default there.
 
     `element_groups` (optional) is a force-decomposition probe for diagnostics: a dict mapping a
     label to a list of `(element_id, dof, coef)`. At each converged step it records, per label, the
@@ -186,7 +194,7 @@ def run_pushover(
         ops.load(ld.node, *ld.values)
 
     ops.test("NormDispIncr", tol, max_iter)
-    ops.algorithm("Newton")  # Stage 1 elastic; ModifiedNewton is an option for Stage 2
+    ops.algorithm(*algorithm)  # primary solver (default Newton; ModifiedNewton -initial for softening)
     ops.analysis("Static")
 
     sign = 1.0 if target >= 0.0 else -1.0
@@ -219,8 +227,8 @@ def run_pushover(
             continue
         # retry the increment with finer sub-steps and stronger algorithms (softening, D20)
         sub_ok = False
-        for algo, args in (("Newton", ()), ("KrylovNewton", ()), ("NewtonLineSearch", ("-type", "Bisection"))):
-            ops.algorithm(algo, *args)
+        for spec in (algorithm, ("KrylovNewton",), ("NewtonLineSearch", "-type", "Bisection")):
+            ops.algorithm(*spec)
             for nsub in (5, 20, 50):
                 ops.integrator("DisplacementControl", control_node, control_dof, du / nsub)
                 if ops.analyze(nsub) == 0:
@@ -229,7 +237,7 @@ def run_pushover(
                     break
             if sub_ok:
                 break
-        ops.algorithm("Newton")
+        ops.algorithm(*algorithm)
         ops.integrator("DisplacementControl", control_node, control_dof, du)  # restore full step
         if not sub_ok:
             converged = False
@@ -240,6 +248,255 @@ def run_pushover(
     if element_groups is not None:
         result["groups"] = groups
     return result
+
+
+def cyclic_protocol(peaks, *, cycles_per_level: int = 2, start_positive: bool = True) -> list[float]:
+    """Expand target drift/displacement amplitudes into a reversed-cyclic displacement history.
+
+    `peaks` are the amplitudes (same unit as the control DOF); each is repeated
+    `cycles_per_level` times as a full push-pull cycle returning to zero, e.g. peaks=[1, 2] with
+    2 cycles gives [+1,-1,+1,-1, +2,-2,+2,-2, 0]. `cycles_per_level` may also be a per-level list
+    (the ACI 374.2R protocol used for these wall tests runs three cycles up to yield and two
+    after). The history always ends back at zero.
+    """
+    counts = ([cycles_per_level] * len(peaks) if isinstance(cycles_per_level, int)
+              else list(cycles_per_level))
+    if len(counts) != len(peaks):
+        raise ValueError(f"cycles_per_level has {len(counts)} entries for {len(peaks)} peaks")
+    sign = 1.0 if start_positive else -1.0
+    history: list[float] = []
+    for peak, n in zip(peaks, counts):
+        for _ in range(int(n)):
+            history.extend((sign * abs(peak), -sign * abs(peak)))
+    history.append(0.0)
+    return history
+
+
+def run_cyclic(
+    model: Model,
+    *,
+    lateral_loads,
+    control_node: int,
+    control_dof: int,
+    history,
+    dU: float,
+    gravity_loads=None,
+    gravity_steps: int = 10,
+    base_nodes=None,
+    tol: float = 1e-5,
+    max_iter: int = 100,
+    algorithm: "tuple[str, ...]" = ("ModifiedNewton", "-initial"),
+) -> dict:
+    """Gravity (constant) → reversed-cyclic DisplacementControl, recording base shear (D48).
+
+    The cyclic sibling of `run_pushover`: same gravity-then-lateral-pattern setup, but instead of
+    marching to a single target it walks the control DOF to each displacement in `history` in turn,
+    reversing the increment sign as needed. Build `history` with `cyclic_protocol`.
+
+    `algorithm` defaults to `("ModifiedNewton", "-initial")` — a reversed-cyclic run on a cracking
+    lattice re-forms a softening (possibly negative) tangent at every reversal, and iterating on the
+    constant initial stiffness is what survives that (the D44 finding, and doubly true here).
+    Failed increments fall back to finer sub-steps and stronger algorithms exactly as in
+    `run_pushover`; on exhaustion the run STOPS and returns what it traced with `converged=False`,
+    so a partial hysteresis is still usable and honestly labelled.
+
+    Returns {"ok", "converged", "disp", "shear", "control_node", "base_nodes", "reached"} where
+    `reached` is the number of history targets completed.
+    """
+    build(model)
+    base = list(base_nodes) if base_nodes is not None else [s.node for s in model.supports]
+
+    ops.system("BandGeneral")
+    ops.numberer("RCM")
+    ops.constraints("Transformation")
+
+    grav = _gravity_loads(model, gravity_loads)
+    if grav:
+        if _apply_gravity(model, grav, gravity_steps, tol) != 0:
+            return {"ok": -1, "converged": False, "stage": "gravity", "disp": [], "shear": [],
+                    "control_node": control_node, "base_nodes": base, "reached": 0}
+        ops.loadConst("-time", 0.0)
+
+    ops.timeSeries("Linear", 2)
+    ops.pattern("Plain", 2, 2)
+    for ld in lateral_loads:
+        ops.load(ld.node, *ld.values)
+
+    ops.test("NormDispIncr", tol, max_iter)
+    ops.algorithm(*algorithm)
+    ops.analysis("Static")
+
+    def control_disp() -> float:
+        return ops.nodeDisp(control_node, control_dof)
+
+    def base_shear() -> float:
+        ops.reactions()
+        return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
+
+    disp: list[float] = [control_disp()]
+    shear: list[float] = [base_shear()]
+
+    converged, reached = True, 0
+    for goal in history:
+        sign = 1.0 if goal >= control_disp() else -1.0
+        du = sign * abs(dU)
+        ops.integrator("DisplacementControl", control_node, control_dof, du)
+        while sign * (goal - control_disp()) > 1e-9 * (abs(goal) + 1.0):
+            if ops.analyze(1) == 0:
+                disp.append(control_disp())
+                shear.append(base_shear())
+                continue
+            sub_ok = False
+            for spec in (algorithm, ("KrylovNewton",), ("NewtonLineSearch", "-type", "Bisection")):
+                ops.algorithm(*spec)
+                for nsub in (5, 20, 50):
+                    ops.integrator("DisplacementControl", control_node, control_dof, du / nsub)
+                    if ops.analyze(nsub) == 0:
+                        disp.append(control_disp())
+                        shear.append(base_shear())
+                        sub_ok = True
+                        break
+                if sub_ok:
+                    break
+            ops.algorithm(*algorithm)
+            ops.integrator("DisplacementControl", control_node, control_dof, du)
+            if not sub_ok:
+                converged = False
+                break
+        if not converged:
+            break
+        reached += 1
+
+    return {"ok": 0 if converged else -1, "converged": converged, "disp": disp, "shear": shear,
+            "control_node": control_node, "base_nodes": base, "reached": reached}
+
+
+def run_pushover_arclength(
+    model: Model,
+    *,
+    lateral_loads,
+    control_node: int,
+    control_dof: int,
+    dU: float,
+    target: float,
+    gravity_loads=None,
+    gravity_steps: int = 10,
+    base_nodes=None,
+    tol: float = 1e-6,
+    max_iter: int = 50,
+    max_steps: int = 800,
+    alpha: float = 0.0,
+    stop_shear_frac: float = 0.02,
+) -> dict:
+    """Gravity (constant) → cylindrical ARC-LENGTH pushover, recording base shear.
+
+    Traces the full force–deformation response INCLUDING snapback — the descending branch that
+    ordinary DisplacementControl cannot follow, because the control displacement itself must
+    *decrease* while the load drops (a localizing crack band opening while the rest of the specimen
+    unloads elastically). Arc-length constrains the displacement-increment NORM and lets the load
+    factor float, so it traverses limit points AND snapback. `alpha=0` gives Crisfield's cylindrical
+    form (the load term dropped from the constraint) — the robust choice for softening.
+
+    Sequence (mirrors `run_pushover`):
+      1. apply `gravity_loads` (or `model.loads`) as a constant, held pattern;
+      2. add `lateral_loads` (a list of `Load`) as the reference pattern the arc-length scales;
+      3. take ONE DisplacementControl *probe* step of `dU` on `control_node`/`control_dof` — this
+         fixes a well-scaled arc length (= the resulting displacement-increment norm) and the initial
+         loading direction (the probe is still on the ascending branch, so the tangent is positive
+         definite and arc-length then continues forward);
+      4. march with `ArcLength` up to `max_steps`, recording (control disp, base shear) per step.
+
+    Stops when `|control disp|` reaches `target`, the base shear falls below `stop_shear_frac` of the
+    running peak (crack essentially fully open — a clean end for a softening coupon), or a step fails
+    after arc-length reduction. On a failed step the arc length is cut (and stronger algorithms
+    tried) before giving up. Base shear = `-Σ reaction[control_dof]` over `base_nodes` (defaults to
+    the supported nodes). Returns {"ok","converged","disp","shear","control_node","base_nodes"}.
+    """
+    ops.wipe()
+    build(model)
+    base = list(base_nodes) if base_nodes is not None else [s.node for s in model.supports]
+
+    ops.system("BandGeneral")
+    ops.numberer("RCM")
+    ops.constraints("Transformation")
+
+    grav = _gravity_loads(model, gravity_loads)
+    if grav:
+        if _apply_gravity(model, grav, gravity_steps, tol) != 0:
+            return {"ok": -1, "converged": False, "stage": "gravity", "disp": [], "shear": [],
+                    "control_node": control_node, "base_nodes": base}
+        ops.loadConst("-time", 0.0)
+
+    ops.timeSeries("Linear", 2)
+    ops.pattern("Plain", 2, 2)
+    for ld in lateral_loads:
+        ops.load(ld.node, *ld.values)
+
+    ops.test("NormDispIncr", tol, max_iter)
+    ops.algorithm("Newton")
+    ops.analysis("Static")
+
+    def cdisp() -> float:
+        return ops.nodeDisp(control_node, control_dof)
+
+    def base_shear() -> float:
+        ops.reactions()
+        return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
+
+    def disp_norm() -> float:
+        """L2 norm of the full nodal-displacement vector (= the increment norm for a from-zero step)."""
+        total = 0.0
+        for nid in model.nodes:
+            for d in range(1, model.ndf + 1):
+                u = ops.nodeDisp(nid, d)
+                total += u * u
+        return math.sqrt(total)
+
+    disp = [cdisp()]
+    shear = [base_shear()]
+
+    # probe step (DisplacementControl) — sets the arc-length scale and the loading direction
+    sign = 1.0 if target >= 0.0 else -1.0
+    ops.integrator("DisplacementControl", control_node, control_dof, sign * abs(dU))
+    if ops.analyze(1) != 0:
+        return {"ok": -1, "converged": False, "stage": "probe", "disp": disp, "shear": shear,
+                "control_node": control_node, "base_nodes": base}
+    disp.append(cdisp())
+    shear.append(base_shear())
+
+    s = disp_norm()   # arc length = the probe step's displacement-increment norm (from zero)
+    ops.integrator("ArcLength", s, alpha)
+
+    converged = True
+    goal = abs(target)
+    for _ in range(max_steps):
+        if ops.analyze(1) != 0:
+            sub_ok = False
+            for algo, args in (("Newton", ()), ("KrylovNewton", ()),
+                               ("NewtonLineSearch", ("-type", "Bisection"))):
+                ops.algorithm(algo, *args)
+                for factor in (0.5, 0.25, 0.1):
+                    ops.integrator("ArcLength", s * factor, alpha)
+                    if ops.analyze(1) == 0:
+                        sub_ok = True
+                        break
+                if sub_ok:
+                    break
+            ops.algorithm("Newton")
+            ops.integrator("ArcLength", s, alpha)   # restore the full arc length
+            if not sub_ok:
+                converged = False
+                break
+        disp.append(cdisp())
+        shear.append(base_shear())
+        if sign * cdisp() >= goal - 1e-12:
+            break
+        peak = max(abs(v) for v in shear)
+        if peak > 0.0 and abs(shear[-1]) < stop_shear_frac * peak and sign * cdisp() > 0.0:
+            break
+
+    return {"ok": 0 if converged else -1, "converged": converged, "disp": disp, "shear": shear,
+            "control_node": control_node, "base_nodes": base}
 
 
 def run_pushover_dynamic(
@@ -253,6 +510,7 @@ def run_pushover_dynamic(
     gravity_steps: int = 10,
     base_nodes=None,
     periods_to_target: float = 12.0,
+    rate: float | None = None,
     steps_per_period: int = 40,
     damping_ratio: float = 0.6,
     tol: float = 1e-5,
@@ -286,20 +544,40 @@ def run_pushover_dynamic(
                     "control_node": control_node, "base_nodes": base}
         ops.loadConst("-time", 0.0)
 
+    # Drop the gravity stage's Static analysis first: while it exists OpenSees REFUSES to set a
+    # transient integrator and silently falls back to a default, so the Newmark below is ignored.
+    # wipeAnalysis clears only the analysis aggregation, so the solver must be re-declared (D49).
+    ops.wipeAnalysis()
+    ops.constraints("Transformation")
+    ops.numberer("RCM")
+    ops.system("BandGeneral")
+
     # fundamental frequency sets the (quasi-static) loading rate, step, and Rayleigh damping
-    lam1 = ops.eigen("-fullGenLapack", 1)[0]
+    try:                                     # the default solver is far faster than fullGenLapack
+        lam1 = ops.eigen(1)[0]
+    except Exception:
+        lam1 = ops.eigen("-fullGenLapack", 1)[0]
     w1 = math.sqrt(lam1) if lam1 > 0 else 1.0
     T1 = 2.0 * math.pi / w1
-    total_time = periods_to_target * T1
     dt = T1 / steps_per_period
-    rate = target / total_time
-    ops.rayleigh(damping_ratio * w1, damping_ratio / w1, 0.0, 0.0)  # ~damping_ratio at w1
+    # PREFER `rate`. Deriving the speed from `periods_to_target` scales it with the TARGET, so the
+    # same `periods_to_target` drives a larger pushover proportionally faster — and the recorded
+    # base shear is a sum of reactions that includes inertial and DAMPING (C*v) terms, both of which
+    # grow with speed. Calibrate `rate` once against a static run and it transfers between targets.
+    drive_rate = float(rate) if rate is not None else abs(target) / (periods_to_target * T1)
+    if drive_rate <= 0.0:
+        raise ValueError(f"drive rate must be positive, got {drive_rate}")
+    total_time = abs(target) / drive_rate
+    # Rayleigh on the INITIAL stiffness (3rd arg), never the current tangent (2nd): a betaK term
+    # rides the committed tangent, so when struts crack at speed the damping force explodes and
+    # diverges the solve (D49). betaKinit gives the same damping from a matrix that never collapses.
+    ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
 
     # impose the ramped lateral displacement on the drive nodes (disp = rate * t)
     ops.timeSeries("Linear", 3)
     ops.pattern("Plain", 3, 3)
     for nid in drive:
-        ops.sp(nid, control_dof, rate)
+        ops.sp(nid, control_dof, drive_rate)
 
     ops.test("NormDispIncr", tol, max_iter)
     ops.algorithm("Newton")
@@ -317,7 +595,6 @@ def run_pushover_dynamic(
     converged = True
     nsteps = int(round(total_time / dt))
     for _ in range(nsteps):
-        print(f"Step {_}", flush=True)
         if ops.analyze(1, dt) != 0:
             sub_ok = False
             for algo in ("KrylovNewton", "NewtonLineSearch"):
@@ -334,6 +611,160 @@ def run_pushover_dynamic(
             break
     return {"converged": converged, "disp": disp, "shear": shear,
             "control_node": control_node, "base_nodes": base}
+
+
+def run_cyclic_dynamic(
+    model: Model,
+    *,
+    control_node: int,
+    control_dof: int,
+    history,
+    drive_nodes=None,
+    gravity_loads=None,
+    gravity_steps: int = 10,
+    base_nodes=None,
+    periods_to_peak: float = 48.0,
+    rate: float | None = None,
+    steps_per_period: int = 30,
+    damping_ratio: float = 0.8,
+    damping_modes: int = 5,
+    tol: float = 1e-5,
+    max_iter: int = 50,
+    progress=None,
+) -> dict:
+    """Dynamic-relaxation REVERSED-CYCLIC analysis (D49): the cyclic sibling of
+    `run_pushover_dynamic`.
+
+    A static path-follower cannot cross the softening instability of a cracking lattice (D38/D44/D45);
+    dynamic relaxation rides through it because mass and damping regularize the singular tangent
+    (D46). This drives the whole reversing history rather than a single ramp.
+
+    Mechanism: the displacement history is carried by a `Path` time series and imposed on
+    `drive_nodes` through single-point constraints, so one continuous transient solve traces every
+    cycle — no pattern teardown at reversals, and the imposed displacement stays continuous across
+    them. The model is marched with Newmark plus heavy Rayleigh damping.
+
+    QUASI-STATIC RATE — the parameter that decides whether the answer means anything. The recorded
+    base shear is a sum of REACTIONS, which in a transient solve include inertial and damping
+    contributions; it is the quasi-static cyclic response only if the drive is slow enough that
+    those are negligible. Give `rate` (displacement units per second) directly, or leave it None to
+    derive it as `max|history| / (periods_to_peak * T1)`. Either way it is held CONSTANT for every
+    segment, so a larger cycle simply takes proportionally longer.
+
+    PREFER `rate`. Deriving from `periods_to_peak` scales the speed with the protocol's amplitude,
+    so the SAME `periods_to_peak` drives a 4%-drift protocol four times faster than a 1% one and
+    silently contaminates the larger run. `rate` is amplitude-independent and transfers between
+    protocols. Calibrate it once by running a small-amplitude cycle both statically and
+    dynamically: when the peak shears agree, the rate is slow enough.
+
+    Cost scales as `total_path * periods_to_peak * steps_per_period / max|history|`, so a full
+    protocol is tens of thousands of steps — hours, not minutes. `progress(i, nsteps, disp, shear)`
+    is called every 200 steps if given, so a long run can report where it is.
+
+    Returns {"converged", "disp", "shear", "control_node", "base_nodes", "steps", "rate", "T1"}.
+    """
+    if not model.masses:
+        raise ValueError("run_cyclic_dynamic requires nodal mass on the model")
+    hist = [float(h) for h in history]
+    if not hist:
+        raise ValueError("history is empty")
+    peak = max(abs(h) for h in hist)
+    if peak <= 0.0:
+        raise ValueError("history must contain a non-zero amplitude")
+
+    ops.wipe()
+    build(model)
+    base = list(base_nodes) if base_nodes is not None else [s.node for s in model.supports]
+    drive = list(drive_nodes) if drive_nodes is not None else [control_node]
+
+    ops.system("BandGeneral")
+    ops.numberer("RCM")
+    ops.constraints("Transformation")
+
+    grav = _gravity_loads(model, gravity_loads)
+    if grav:
+        if _apply_gravity(model, grav, gravity_steps, tol) != 0:
+            return {"converged": False, "stage": "gravity", "disp": [], "shear": [],
+                    "control_node": control_node, "base_nodes": base, "steps": 0}
+        ops.loadConst("-time", 0.0)
+
+    # Drop the gravity stage's Static analysis. While it exists OpenSees REFUSES to set a transient
+    # integrator ("can't set transient integrator in static analysis") and silently falls back to a
+    # default, so the integrator chosen below would be ignored. wipeAnalysis clears only the analysis
+    # aggregation — domain, gravity loadConst and mass persist — so the solver must be re-declared.
+    ops.wipeAnalysis()
+    ops.constraints("Transformation")
+    ops.numberer("RCM")
+    ops.system("BandGeneral")
+
+    try:                                     # the default solver is far faster than fullGenLapack
+        lams = ops.eigen(max(1, damping_modes))
+    except Exception:
+        lams = ops.eigen("-fullGenLapack", max(1, damping_modes))
+    w1 = math.sqrt(lams[0]) if lams[0] > 0 else 1.0
+    T1 = 2.0 * math.pi / w1
+    drive_rate = float(rate) if rate is not None else peak / (periods_to_peak * T1)
+    if drive_rate <= 0.0:
+        raise ValueError(f"drive rate must be positive, got {drive_rate}")
+    dt = T1 / steps_per_period
+
+    # Rayleigh damping on the INITIAL stiffness (3rd arg), never the current tangent (2nd arg).
+    # A `betaK` term rides the COMMITTED tangent, so when struts crack at speed the damping force
+    # explodes — the D28 artifact, and in a cracking lattice it diverges the solve outright rather
+    # than merely spiking the reaction. `betaKinit` gives the same relaxation damping from a matrix
+    # that never collapses. (Modal damping, D33's answer for the seismic runner, is NOT usable here:
+    # dynamic relaxation needs damping near critical, and modalDamping at that level is pathological
+    # — it fails to converge from the first step.)
+    ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
+
+    # Piecewise-linear displacement path at constant speed `drive_rate`; the Path series then IS the
+    # imposed displacement, so sp() carries a unit factor.
+    times, values, cur = [0.0], [0.0], 0.0
+    for goal in hist:
+        times.append(times[-1] + abs(goal - cur) / drive_rate)
+        values.append(goal)
+        cur = goal
+    total_time = times[-1]
+
+    ops.timeSeries("Path", 3, "-time", *times, "-values", *values)
+    ops.pattern("Plain", 3, 3)
+    for nid in drive:
+        ops.sp(nid, control_dof, 1.0)
+
+    ops.test("NormDispIncr", tol, max_iter)
+    ops.algorithm("Newton")
+    ops.integrator("HHT", 0.7)   # numerical damping: aids convergence through cracking and
+    ops.analysis("Transient")    # dissipates the high-frequency content modal damping leaves
+
+    def cdisp() -> float:
+        return ops.nodeDisp(control_node, control_dof)
+
+    def base_shear() -> float:
+        ops.reactions()
+        return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
+
+    disp, shear = [cdisp()], [base_shear()]
+    nsteps = max(1, int(round(total_time / dt)))
+    converged = True
+    for i in range(nsteps):
+        if ops.analyze(1, dt) != 0:
+            sub_ok = False
+            for algo in ("KrylovNewton", "NewtonLineSearch"):
+                ops.algorithm(algo)
+                if ops.analyze(10, dt / 10.0) == 0:
+                    sub_ok = True
+                    break
+            ops.algorithm("Newton")
+            if not sub_ok:
+                converged = False
+                break
+        disp.append(cdisp())
+        shear.append(base_shear())
+        if progress is not None and (i + 1) % 200 == 0:
+            progress(i + 1, nsteps, disp[-1], shear[-1])
+
+    return {"converged": converged, "disp": disp, "shear": shear, "control_node": control_node,
+            "base_nodes": base, "steps": len(disp) - 1, "rate": drive_rate, "T1": T1}
 
 
 # --- nonlinear seismic time-history (UniformExcitation) ---------------------
@@ -555,6 +986,41 @@ def run_beamcolumn_cantilever(*, height: float = 144.0, P: float = 180.0,
     ops.test("NormDispIncr", 1e-6, 1000); ops.algorithm("Newton")
     ops.analysis("Static")
     return _displacement_pushover(2, 1, [1], dU, target)
+
+
+def run_dispbeamcolumn_tension(*, length: float, width: float, depth: float, material,
+                               dU: float, target: float, n_int: int = 3) -> dict:
+    """Single DISPLACEMENT-based fiber beam-column in uniaxial tension — the reference for the plain
+    concrete cube lattice (a material coupon: one member, two nodes). Node 1 fixed at the origin,
+    node 2 at (0, length) pulled axially (+Y) under DisplacementControl; no gravity. The fiber
+    section is the cube face (`width` in local z x `depth` in local y) of one plain-concrete
+    `material` (a backend-agnostic `UniaxialMaterial` spec carrying `.mtype` + `.args`).
+
+    Why displacement-based: a `dispBeamColumn` interpolates the axial displacement LINEARLY, so the
+    axial strain is CONSTANT along the element — the whole element carries eps = u/length uniformly
+    (no integration-point localization, unlike a force-based element), and the axial response is
+    exactly A*sigma(eps). That makes it the clean 1D reference for the concrete's uniaxial tension
+    law. Returns the pushover curve {"disp", "shear", "converged"} where shear = the axial base
+    reaction (tension positive)."""
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    ops.node(1, 0.0, 0.0); ops.node(2, 0.0, length)
+    ops.fix(1, 1, 1, 1)
+
+    ops.uniaxialMaterial(material.mtype, 1, *material.args)
+    y1, z1 = depth / 2.0, width / 2.0
+    ops.section("Fiber", 1)
+    ops.patch("quad", 1, 4, 4, -y1, z1, -y1, -z1, y1, -z1, y1, z1)   # homogeneous plain-concrete face
+    ops.geomTransf("Linear", 1)                                       # small strain (tension), no P-Delta
+    ops.beamIntegration("Legendre", 1, 1, n_int)
+    ops.element("dispBeamColumn", 1, 1, 2, 1, 1)
+
+    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+    ops.load(2, 0.0, 1.0, 0.0)   # axial reference pull (+Y); DisplacementControl sets the magnitude
+    ops.system("BandGeneral"); ops.numberer("RCM"); ops.constraints("Transformation")
+    ops.test("NormDispIncr", 1e-8, 1000); ops.algorithm("Newton")
+    ops.analysis("Static")
+    return _displacement_pushover(2, 2, [1], dU, target)
 
 
 def run_beamcolumn_dynamic(*, height: float, P: float, materials,

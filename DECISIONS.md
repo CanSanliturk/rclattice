@@ -713,3 +713,331 @@ unlogged decision or a skipped number; please confirm.)
 - **Status:** implemented + verified (single-element seismic reference converges; modal figure
   renders; test suite unchanged at 25 pass + the one pre-existing known-fail). Backend independence
   preserved.
+
+### D37 — 2026-07-14 — Plain-concrete cube uniaxial-tension study (`examples/cube/`): lattice vs a single displacement-based beam-column
+- **Context (user request):** the simplest possible lattice check — a 0.1 m plain-concrete cube
+  (Concrete02) modelled two ways and compared under UNIAXIAL TENSION (a material coupon), mirroring
+  the structure of `examples/column/` but much thinner.
+- **Decisions (user, AskUserQuestion):**
+  (1) **2D plane-stress square represents the cube** — a 100×100 mm face with 100 mm out-of-plane
+  thickness (the section perpendicular to the pull is L×THK = the cube face). The lattice/continuum
+  mesher is 2D-only (gmsh plane surface); a true 3D lattice was rejected as a large new capability
+  (no 3D mesher/builders) out of scope for "similar to examples/column". Uniaxial tension is fully
+  captured by the 2D model.
+  (2) **Fully fixed base** — the bottom edge is fixed in X and Y (like the column), the top edge is
+  pulled up (+Y) under DisplacementControl. (The frictionless-platen alternative — a purer 1D
+  uniaxial stress — was offered and declined.)
+  (3) **Plain Concrete02 on both sides** — NO fracture-energy regularization (D20) and no residual
+  plateau/corotTruss/dynamic-relaxation (D22). The calibration target is the INITIAL STIFFNESS only;
+  the post-peak softening is left plain (so the truss lattice snaps at the crack, as expected).
+- **Reference = a single DISPLACEMENT-based fiber `dispBeamColumn`** (new `opensees.run_dispbeamcolumn_tension`),
+  NOT the force-based `forceBeamColumn` used elsewhere. A displacement-based element interpolates the
+  axial displacement linearly → CONSTANT axial strain along the element → the whole element carries
+  eps=u/L uniformly with no integration-point localization, so the axial response is exactly
+  A·σ(eps): the clean 1D coupon. Fiber section = the cube face (one plain-concrete material), fixed
+  base, axial DisplacementControl pull, Linear geomTransf (small strain, no P-Δ).
+- **Units:** SI in **N–mm** (edge = 100 mm, E = 30000 N/mm² = 30 GPa, stresses in MPa) so cracking
+  displacements are O(0.01 mm) — well conditioned for the default NormDispIncr tolerances (pure-metre
+  units make them ~1e-5 and fight the solver). Grade: generic C30 (fc 30, ft 3, epsc0 0.002, fcu 6,
+  epsU 0.006).
+- **Files:** `examples/cube/{specimen.py,build.py,pushover.py}` (thin package, sibling imports like
+  the column/frame packages; output → `examples/output/cube/pushover/`). `calibrate_area` matches the
+  elastic lattice's axial K0 to the beam-column's (K linear in strut area → one tiny tension solve);
+  `cube_lattice` builds the plain-Concrete02 strut lattice (`build_lattice_rc`, one trivial zone, no
+  rebar, `Truss` struts). Output is the coupon **stress–strain** curve (σ = base reaction / L·THK,
+  ε = top disp / L).
+- **Result (N, mm; MESH 10 → 121 nodes, 420 struts):** dispBeamColumn K0 = 3.0e6 N/mm (= E·A/L),
+  peak = 30000 N = **3.00 MPa = ft**, full softening traced to 0.08 mm. Lattice: strut area calibrated
+  to **631.2 mm²** → K0 matched exactly (elastic branches overlap); peak **2.88 MPa (~4% below ft)**,
+  then `conv=False` at the cracking strain (u≈0.01 mm) — the plain-Concrete02 truss lattice snaps at
+  the crack band (displacement-controlled snapback), the expected consequence of decision (3).
+- **Status:** accepted. Additive backend change (new `run_dispbeamcolumn_tension`); test suite
+  unchanged (25 pass + the same one pre-existing known-fail). Follow-up available if the lattice
+  descending branch is wanted: D20 regularization + D22 residual plateau / corotTruss / dynamic-
+  relaxation pushover (deliberately off here to honour the plain-Concrete02 choice). See D38 (the
+  descending-branch follow-up: arc-length integrated, but the plain-Concrete02 crack is a mechanism,
+  so only dynamic relaxation traces it).
+
+### D38 — 2026-07-14 — Cube descending branch: arc-length integrated, but the plain-Concrete02 tension crack is a MECHANISM (singular), not a snapback → only dynamic relaxation traces it
+- **Context (user request):** "integrate arclength properly" so the cube lattice (D37) can follow the
+  DESCENDING branch of its uniaxial-tension force–deformation curve — which plain DisplacementControl
+  cannot (it dies at the peak, D37).
+- **What was built:** `opensees.run_pushover_arclength` — a proper cylindrical arc-length (Crisfield,
+  `alpha=0` so the load term drops from the constraint) pushover: a DisplacementControl PROBE step
+  fixes a well-scaled arc length (= the probe's displacement-increment norm) and the loading
+  direction, then `integrator ArcLength` marches with adaptive arc reduction + stronger-algorithm
+  fallback, stopping on a displacement target / a base-shear-fraction floor / a failed step. Same
+  `run_pushover`-style interface (gravity → lateral pattern → base-shear recording). Wired into
+  `examples/cube/pushover.py` as `--solver {static,arclength,dynamic}` (default `static`).
+- **KEY FINDING (empirically established, evidence in-session):** arc-length does NOT trace this
+  branch, and the reason is fundamental, not a tuning failure. Tests on the calibrated cube lattice:
+  - global arc-length (`ArcLength` alpha=0/1, `MinUnbalDispNorm`): **oscillates/stalls at the peak**;
+  - single-node indirect displacement control (control a crack-band node), **± a triggering
+    imperfection** (weaken the base band): **fails at the peak**;
+  - even with fracture-energy REGULARIZATION (gentler softening, D20), arc-length and DisplacementControl
+    **fail at the SAME step** (the delayed limit point) — arc-length gains nothing.
+  Root cause: plain **Concrete02 tension softens to ZERO stiffness**, so once a horizontal band cracks
+  the block above it is a **kinematic mechanism** and the tangent stiffness is **SINGULAR** (rank
+  deficient), not merely negative. A snapback (negative-definite but non-singular tangent) is what
+  arc-length is for; a singular tangent / mechanism is not something ANY static path-follower can
+  cross. This is the D4 truss-lattice-mechanism caveat, in tension (where — unlike D22's compression
+  residual plateau — Concrete02 leaves no residual stiffness floor).
+- **What DOES trace it — dynamic relaxation** (`run_pushover_dynamic`, D22): a quasi-static transient
+  whose inertia keeps the system well-posed THROUGH the mechanism. On the cube it traces the full
+  pre- + post-peak branch, `conv=True` to u=0.12 mm: elastic rise (K0 matched) → peak (dynamic
+  OVERSHOOT to ~3.5 MPa vs ft 3.0, from inertia + the finite ramp rate + diagonal redistribution) →
+  the crack snap → damped ringing about zero → zero (fully cracked). The snap is genuinely dynamic
+  (a brittle unreinforced tension crack IS an unstable event — why real direct-tension tests need
+  servo CMOD control), so the post-peak carries dynamic artifacts; that is honest, not a bug.
+- **Decision:** keep `run_pushover_arclength` (a correct, general, reusable snapback solver — it will
+  matter for problems whose softening retains a non-singular tangent, e.g. residual-plateau /
+  reinforced cases), expose all three solvers, and **document that `--solver dynamic` is the one that
+  follows the cube's descending branch**. Did NOT silently regularize or add a tension residual to
+  force arc-length through — that would change the D37 plain-Concrete02 physics the user chose.
+- **Options recorded for a future turn (if a cleaner STATIC descending branch is wanted):** (a) give
+  the cracked struts a small residual tension stiffness (parallel Elastic strut / a tension floor) so
+  the tangent stays non-singular → arc-length then traces a real snapback; (b) fracture-energy
+  regularization to reduce brittleness (still a mechanism at full crack, but a longer stable branch
+  first); (c) a dedicated local/energy-dissipation arc-length (crack-opening-constrained), not in
+  OpenSees's built-ins.
+- **Status:** accepted. Additive (`run_pushover_arclength`; removed a stray `print("Step …")` debug
+  line in `run_pushover_dynamic`); test suite unchanged (25 pass + the same one pre-existing known-fail).
+
+### D39 — 2026-07-14 — Cube: the lattice FOLLOWS the reference once its struts are fracture-energy-regularized (localization fix); default flipped to regularized + dynamic
+- **Context (user):** "I can't see that lattice model follow[s the] reference model." On the D37/D38
+  figure the two descending branches diverge completely — the reference (single element) softens
+  gently from ft to 0 over global strain 0→1.1e-3, but the lattice drops near-vertically at ~3.5e-4.
+- **Diagnosis (three distinct causes, established with in-session evidence):**
+  1. **Localization / mesh-size (the visible "doesn't follow"):** the single-element reference smears
+     its softening over the WHOLE 100 mm element; the lattice crack localizes into ONE ~10 mm strut
+     row, so it reaches zero stress at ~1/10th the global strain. This is the crack-band problem, and
+     the fix is fracture-energy regularization (D20).
+  2. **Mechanism / solver (D38):** the cracked band → 0 stiffness → singular tangent, so only dynamic
+     relaxation traces the branch.
+  3. **Diagonal overstrength (strength, NOT stiffness):** matching K0 does NOT match tensile
+     strength — the diagonal struts add a parallel tensile load path, so the lattice PEAK overshoots
+     ft (≈4.5 MPa regularized vs 3.0; slowing the dynamic loading to 60 periods did NOT reduce it →
+     it is real overstrength, not inertia). **User decision: "You don't need to match peaks, it's
+     ok"** — so cause 3 is left uncorrected (a strut-strength calibration is deferred).
+- **Decision:** regularize the lattice struts to the reference's IMPLIED fracture energy so the two
+  descending branches align. The reference uses plain Concrete02 with default `Ets = 0.1*E` smeared
+  over L, i.e. `Gf_ref = ft^2 * L / (2 * 0.1*E)` (= 0.15 N/mm for this grade); the lattice struts are
+  crack-band regularized (`concrete_uniaxial_regularized`, D20) to that SAME `Gf`, so the crack
+  opening at failure `w = 2Gf/ft` is band-width-independent and both models reach zero at the same
+  global strain (≈1.1e-3). Verified: the regularized lattice, traced with dynamic relaxation, now
+  overlaps the reference elastic branch (K0), softens over the same strain range, and is a CLEAN
+  curve (gentle softening ⇒ the dynamic snap/ringing of the plain case is gone). Only the peak sits
+  higher (cause 3, accepted).
+- **Defaults flipped (`examples/cube/pushover.py`):** the lattice is now **regularized by default**
+  (`--plain` recovers the D37 K0-only baseline) and the default solver is **`dynamic`** (the only one
+  that follows the branch; `static`/`arclength` still offered and still die at the mechanism, D38).
+  `build.cube_lattice(area, *, regularize=True, Gf=REF_GF)`; `REF_GF` computed from the grade + L.
+  Output stem `cube_tension_<solver>[_plain].png`.
+- **Status:** accepted. Example-layer change only (`build.py`, `pushover.py`); backend untouched since
+  D38; test suite unchanged (25 pass + the same one pre-existing known-fail). Deferred (user may want
+  later): a strut-tensile-strength calibration so the lattice PEAK also matches (cause 3).
+
+### D40 — 2026-07-14 — Cube peak-strength correction via strut-area reduction by a saved `PEAK_RATIO` (matches peak, sacrifices K0)
+- **Context (user):** address the D39 diagonal-overstrength peak gap by "sav[ing the] peak mismatch
+  ratio as a constant, and use it to modify [the] lattice area by reducing the area [by] the same
+  ratio as the peak mismatch."
+- **Decision:** add `build.PEAK_RATIO = 1.50` (the measured lattice_peak/reference_peak ≈ 4.50/3.00
+  on the default regularized+dynamic run) and have `cube_lattice(area, *, correct_peak=True)` divide
+  the K0-calibrated strut area by `PEAK_RATIO` before building. The lattice peak scales linearly with
+  area, so peak → 4.50/1.50 = **3.00 MPa = reference** (verified: 29997 N ≈ 30000 N).
+- **Explicit trade-off (flagged to the user, then done as asked):** strut area scales stiffness AND
+  strength together, so a single area scalar CANNOT match both. Reducing area to fix the peak also
+  **lowers K0 by the same factor** → the lattice elastic branch is now softer (effective E ≈ E/1.5)
+  and peaks at strain ≈4e-4 instead of the reference's 1e-4; the elastic branches no longer overlap.
+  This is the D39 stiffness match traded for a strength match — the user's call.
+- **Caveat:** `PEAK_RATIO` is the REGULARIZED lattice's overstrength; for `--plain` (overstrength
+  ≈1.17) it over-corrects (peak → 2.34 MPa). `--plain` is only the baseline, so left as-is (documented
+  on the constant). `correct_peak=False` disables the reduction.
+- **The other option (NOT taken, recorded):** reduce the strut TENSILE STRENGTH (`ft`) instead of the
+  area — that lowers the peak while keeping the area, so K0 stays matched AND the peak matches (the two
+  are then calibrated by two independent knobs: area→K0, ft→strength). Offer for a later turn if the
+  user wants both matched.
+- **Status:** accepted (default later flipped OFF by D41 — the correction is now opt-in). Example-layer
+  only (`build.py`, `pushover.py`); backend untouched; test suite unchanged (25 pass + the same one
+  pre-existing known-fail).
+
+### D41 — 2026-07-14 — `PEAK_RATIO` peak correction made a THREE-WAY selectable mode (default off; area OR tensile-strength)
+- **Context (user):** "Keep [the] peak mismatch ratio, but make [it] use[d] as follows: by default it
+  is not used; if intended to modify area, modify the area; if intended to modify tensile [strength],
+  modify [the] material's tensile strength." Turn the D40 always-on area reduction into an opt-in with
+  two mechanisms.
+- **Decision:** `cube_lattice(..., peak_correction: str = "none")` (CLI `--peak-correction`), three modes:
+  - **"none" (DEFAULT)** — `PEAK_RATIO` unused: K0 matched, peak overshoots (~4.50 MPa), and the
+    regularized descending branches still follow (the D39 state). Flips the D40 default OFF.
+  - **"area"** (D40) — divide the calibrated strut area by `PEAK_RATIO`. Peak → 3.00 MPa, but area
+    scales stiffness AND strength together so K0 drops ÷PEAK_RATIO (elastic branch no longer overlaps).
+  - **"strength"** — reduce the concrete grade's `ft` by `PEAK_RATIO` for the STRUT materials
+    (`dataclasses.replace(CONCRETE, ft=CONCRETE.ft/PEAK_RATIO)`), leaving area/`Gf` alone. Peak → 3.10
+    MPa (≈ reference) with the AREA (hence K0) UNCHANGED — the elastic branch STILL overlaps AND the
+    peak matches: two targets met by two independent knobs (area→K0, ft→strength). The D40 "not-taken"
+    option, now available.
+- **Why strength keeps K0 while area doesn't:** peak and K0 both scale ∝ area (one knob → can't hit two
+  targets), but `ft` sets strength independently of the elastic stiffness (E, area), so it is the right
+  lever when BOTH the initial slope and the peak must match. Trade-off of "strength": with `Gf` fixed the
+  smaller `ft` widens the crack-opening at failure (`w=2Gf/ft`), so the softening tail runs slightly past
+  the reference (zero at ≈1.2e-3 vs 1.1e-3) and the pre-peak is more rounded (diagonals yielding
+  progressively) — minor/expected.
+- **Verified (regularized + dynamic):** none → 4.50 MPa; area → 3.00 (K0 ÷1.5); strength → 3.10 (K0
+  unchanged, elastic branch overlaps). Output stem gains `_<mode>` for area/strength.
+- **Status:** accepted. Example-layer only (`build.py`, `pushover.py`); backend untouched; test suite
+  unchanged (25 pass + the same one pre-existing known-fail).
+
+### D42 — 2026-07-21 — Cube reset to a clean LINEAR-ELASTIC baseline (`examples/cube/elastic.py`): scalar-area lattice vs the 1D dispBeamColumn, E matched before any nonlinearity
+- **Context (user):** "Results do not match. Let's start from scratch, and let's try to match linear
+  elastic result first." Step back from the nonlinear peak/softening mismatch (D39–D41) and
+  re-establish a VERIFIED elastic foundation before any cracking is layered on.
+- **Diagnosis (linear-elastic, established with in-session evidence):**
+  1. The elastic dispBeamColumn reference gives effective E = 30000 MPa exactly (= E·A/L).
+  2. A lattice with PHYSICALLY-sized struts (area = tributary MESH·THK = 1000 mm²) is E = 47529 MPa
+     = **1.584× too stiff** — every strut (orthogonal + diagonal) contributes axial stiffness in
+     parallel, so the sum overshoots E·A/L.
+  3. **Root cause = the diagonal struts, not the boundary condition:** a frictionless (roller) base
+     gives 1.540 vs the fixed base's 1.584 (~3% — BC barely matters); an orthogonal-only lattice
+     (horizon 1.2) is a SINGULAR mechanism (the D4 caveat) that won't solve; adding diagonals
+     (horizon 2.1) drives it to 3.636×. The diagonals are structurally REQUIRED and are the source
+     of the over-stiffness.
+  4. This 1.58× elastic over-stiffness is the SAME phenomenon as the ~1.50× nonlinear peak
+     overstrength (`PEAK_RATIO`, D39–D41). A single uniform strut area can cancel it at ONE point
+     only (stiffness OR strength, not both) — which is exactly why the nonlinear study needed a
+     separate `PEAK_RATIO` knob.
+- **Decision (user, AskUserQuestion — "Beam-column E, one area"):** keep the simplest, most defensible
+  baseline — reference = the 1D **elastic** dispBeamColumn (target = E only; a 1D coupon has no
+  Poisson to match), lattice = a SINGLE uniform strut area, scalar-calibrated so the assembly's
+  K0 = E·A/L. The rigorous alternatives offered and DECLINED for step 1: a 2D plane-stress-continuum
+  reference with two orthogonal/diagonal strut-area families to also match Poisson ν.
+- **What was built:** `examples/cube/elastic.py` — a clean, self-contained elastic-ONLY entry point
+  (reuses the backend-agnostic `specimen.py`; carries NONE of the Concrete02 / regularization /
+  dynamic-relaxation machinery). Elastic dispBeamColumn reference (`run_dispbeamcolumn_tension` +
+  `concrete_uniaxial_elastic`), scalar `calibrate_area` (one tiny tension solve — K linear in area),
+  elastic-strut lattice (`build_lattice`), stress–strain overlay via `viz.figure_pushover`. Output →
+  `examples/output/cube/elastic/cube_tension_elastic.png`.
+- **Result (N, mm; MESH 10 → 121 nodes, 420 struts):** calibrated strut area A = **631.20 mm²** →
+  lattice effective E = 30000.0 MPa, secant-E spread over the whole pull = 0.000 MPa (perfectly
+  linear), **E_lattice / E_ref = 1.00000 (0.000 % error)**. The two stress–strain lines overlap
+  exactly on σ = E·ε.
+- **Status:** accepted. ADDITIVE (new `examples/cube/elastic.py`); the D37–D41 nonlinear study
+  (`pushover.py`, `build.py`) is LEFT IN PLACE (not deleted — "from scratch" read as "start the
+  rebuild from a verified elastic baseline," reversible if a full prune is later wanted). Backend
+  untouched; test suite unaffected (additive file, not imported by tests). Next: layer nonlinearity
+  back on top of this baseline step by step (Concrete02 elastic branch first, then cracking/softening).
+
+### D43 — 2026-07-21 — Cube elastic baseline extended with a `--material concrete02` mode: Concrete02's ELASTIC BRANCH reproduces E, with a slight sub-cracking curvature from transverse-strut compression
+- **Context (user):** "Can you use Concrete02 for that elastic example?" — the D42 next step: swap the
+  linear `Elastic` material for the real `Concrete02` law but stay in its elastic branch.
+- **Decision:** `elastic.py main(material=...)` / CLI `--material {elastic,concrete02}` (default
+  `elastic` = the D42 pure-elastic baseline, unchanged). `concrete02` builds Concrete02 struts
+  (`build_lattice_rc`, one zone, `Truss`) and a Concrete02 dispBeamColumn reference, and pulls only to
+  **0.98·eps_cr** (eps_cr = ft/E = 1e-4 here) so BOTH models stay on the elastic branch (Concrete02
+  tension is linear to ft at eps_cr, then softens). Scalar `calibrate_area` is unchanged — it uses the
+  elastic builder, and Concrete02's INITIAL tangent is the same E, so the same area (631.20 mm²)
+  matches K0 in either mode. Effective E is reported from the INITIAL tangent (step 1), robust to any
+  late-branch curvature. Output stem gains `_concrete02`.
+- **Result (concrete02, N–mm):** initial-tangent **E_lattice/E_ref = 0.99992 (0.008 % error)** — the
+  elastic modulus still matches. But the lattice curve is NOT perfectly straight: secant-E spread over
+  the pull ≈ 1243 MPa (~4 %), and it bends slightly BELOW the reference near eps_cr. **Cause
+  (constitutive, not a modelling error — the Elastic mode is dead straight, 0.000 spread):** Concrete02's
+  COMPRESSION branch is parabolic (nonlinear from the origin), and the transverse/diagonal struts go
+  into compression under Poisson contraction, so the assembly softens a touch as the pull grows. The 1D
+  dispBeamColumn reference (single axial fiber, no transverse struts, linear tension to ft) cannot show
+  this, so it stays straight → the small lattice-vs-reference divergence near ft. The vertical struts
+  themselves stay linear (they crack only AT eps_cr); the diagonals see ~0.35·eps (far from their own
+  cracking), so the curvature is transverse-compression, not tension.
+- **Status:** accepted. Example-layer only (`elastic.py`); D42 default behaviour unchanged; backend and
+  tests untouched. The elastic-modulus match (the step goal) holds; the mild sub-cracking curvature is
+  a real Concrete02 feature and previews the next step (tracing THROUGH eps_cr into cracking/softening).
+
+### D44 — 2026-07-21 — Cube PLASTIC pushover (`examples/cube/plastic.py`) on the calibrated area; `run_pushover` gains an `algorithm` knob, default primary = ModifiedNewton -initial for the softening pass
+- **Context (user):** "With the adjusted lattice area after calibration, perform plastic pushover
+  analysis. For [the] numerical part, use modified newton initial by default." The D42/D43 next step:
+  trace the SAME calibrated-area Concrete02 lattice PAST cracking, statically.
+- **Backend change (`run_pushover`, backward-compatible):** new `algorithm: tuple = ("Newton",)` — the
+  PRIMARY solution algorithm (`ops.algorithm(*algorithm)`), used for normal stepping, as the FIRST rung
+  of the failed-step retry ladder (then KrylovNewton → NewtonLineSearch), and on restore. Default
+  `("Newton",)` reproduces the prior behaviour EXACTLY (verified: 25 pass + the same one pre-existing
+  known-fail `test_rc.py::test_nonlinear_pushover_runs_and_yields`, D34 — unchanged). Callers pass
+  `("ModifiedNewton", "-initial")` for a softening pass (iterate on the constant INITIAL elastic
+  stiffness, never re-forming the singular cracked tangent). Replaced the old hard-coded
+  `ops.algorithm("Newton")` primary/restore and the Newton-first retry tuple.
+- **New script `examples/cube/plastic.py`** (reuses `elastic.py`'s `calibrate_area` + `cube_lattice` +
+  `beamcolumn_reference` — DRY): plain (unregularized) Concrete02 struts at the elastic K0-calibrated
+  area **631.20 mm² (NOT re-tuned for the nonlinear range)**, DisplacementControl tension pull to
+  TARGET, **ModifiedNewton -initial by default**; `--full-newton` for contrast. Reference = the
+  Concrete02 dispBeamColumn (single element → constant strain → traces the whole backbone to zero, D37).
+- **KEY RESULT — the algorithm is NOT the limiter; the crack is a mechanism (confirms D38):** BOTH
+  ModifiedNewton -initial AND full Newton trace the entire elastic branch (overlapping the reference)
+  and die at the EXACT SAME point — the first crack, `eps = eps_cr = 1.0e-4`, peak **2.88 MPa**
+  (≈ ft, ~4 % under from the D43 transverse-compression curvature), `u = 0.010 mm`, `conv=False`. The
+  descending branch is not traced. Identical failure point for both algorithms ⇒ the plain-Concrete02
+  tension crack is a GLOBAL singular tangent (a kinematic mechanism / brittle snapback), not an
+  algorithmic convergence difficulty — so NO static path-follower crosses it, not even initial-stiffness
+  iteration (K0 is non-singular, but it cannot track the load-factor snap as the band softens to zero;
+  the load factor blows up to ~±30000 at the crack). This is exactly the D38 conclusion, now reproduced
+  with the robust initial-stiffness algorithm the user asked for.
+- **Decision:** keep **ModifiedNewton -initial as the default** for the plastic pushover (the user's
+  request; and it IS the correct robust default for softening in general — it simply cannot beat a
+  genuine mechanism in THIS problem). Report the static death at the crack honestly rather than forcing
+  a branch. Tracing the full descending branch still needs (deferred, unchanged from D38/D39): crack-band
+  regularization (gentler softening) + dynamic relaxation (`run_pushover_dynamic`) — the only combination
+  that follows it. Plain Concrete02 + static is a mechanism at the crack, full stop.
+- **Status:** accepted. Backend change backward-compatible (verified); new example file `plastic.py`
+  (reuses `elastic.py`). Output → `examples/output/cube/plastic/cube_tension_plastic[_newton].png`.
+
+### D45 — 2026-07-21 — Cube plastic pushover: crack-band regularization made optional (`--regularize`/`--gf`); it defeats localization (traces past first-crack) but not the mechanism (static still can't reach zero)
+- **Context (user):** "Implement crack band regularization but explain me how it works first, and make
+  it optional via cli args." Add the D20 length-regularization to the clean `plastic.py` as a toggle.
+- **How it works (explained to the user):** a softening crack LOCALIZES into one band of width `h` (=
+  strut length). The dissipated energy per crack AREA is `g_f * h` with `g_f = ft^2/(2*Ets)` (area of the
+  linear softening triangle). Keeping the σ–ε curve fixed makes that energy scale with the mesh (smaller
+  `h` → more brittle). Crack-band regularization holds the material fracture energy `Gf` constant by
+  sizing the softening slope from `h`: **`Ets = ft^2*h/(2*Gf)`** ⇒ crack opening `w = 2*Gf/ft`,
+  band-width-independent. Cube numbers: reference (h=100) `Ets`=3000, `Gf`=0.15; PLAIN strut (h=10) keeps
+  `Ets`=3000 so `Gf`=0.015 (10× too little → drops ~10× too steeply); REGULARIZED strut (h=10) `Ets`=300
+  (10× gentler) → `Gf`=0.15, matched. The existing `materials.concrete_uniaxial_regularized` (D20) is
+  the exact implementation.
+- **Implementation (example-layer only):** `plastic.cube_lattice(area, *, regularize, Gf)` — `material_for`
+  returns `concrete_uniaxial_regularized(CONCRETE, 0, length, Gf, Gfc=250*Gf, residual_ratio=0.0)` when
+  on, else plain `concrete_uniaxial_nonlinear`. CLI `--regularize` (default OFF = the D44 plain baseline)
+  and `--gf` (default `REF_GF = ft^2*L/(2*0.1*E) = 0.150 N/mm`, the reference's implied Gf). Output stem
+  gains `_reg`. No backend change (the D44 `algorithm` knob already there).
+- **Result (ModifiedNewton -initial, N–mm):** PLAIN dies AT first crack — 2.88 MPa, `eps = 1.0*eps_cr`,
+  conv=False (D44). REGULARIZED traces PAST first crack — up to 3.46 MPa at `eps = 1.6*eps_cr`, conv=False
+  — but dies while still ASCENDING the post-cracking OVERSTRENGTH climb (verticals cracked, diagonals
+  redistributing; the D39 lattice peak is ~4.5 MPa), before its own peak or ANY descending branch. So
+  regularization defeats LOCALIZATION (static now survives first-crack and enters redistribution) but NOT
+  the MECHANISM (as more struts crack the band still goes singular). The full aligned descending branch
+  still needs regularization + dynamic relaxation (`run_pushover_dynamic`), exactly D38/D39 — deferred,
+  the clear next step. The claimed branch ALIGNMENT is a regularized+dynamic property (D39); the
+  regularized+STATIC run only demonstrates the localization fix + the overstrength onset.
+- **Status:** accepted. Example-layer only (`plastic.py`); backend/tests untouched this turn (D44 already
+  verified 25 pass + the one known-fail). Output → `.../cube_tension_plastic_reg[_newton].png`.
+
+### D46 — 2026-07-21 — Cube plastic pushover: `--solver dynamic` (dynamic relaxation) added; regularized + dynamic traces the FULL descending branch and the lattice FOLLOWS the reference (staged rebuild of D39)
+- **Context (user):** "Go" — take the offered next step: add the dynamic-relaxation solver so the
+  (regularized) lattice can trace the full descending branch through the crack mechanism.
+- **Implementation (example-layer only; no backend change — `run_pushover_dynamic` exists since D22):**
+  `plastic.main(solver=...)` / CLI `--solver {static,dynamic}` (default `static`), dispatched by a new
+  `_lattice_pushover` helper. `dynamic` calls `run_pushover_dynamic` driving the whole TOP EDGE (imposed
+  ramp) with the cube-tuned params `periods_to_target=12, steps_per_period=30, damping_ratio=0.8`
+  (mirrors the D38 cube run). `--full-newton` is now documented as static-only. Output stem gains
+  `_dynamic`. Static path verified unchanged after the refactor (plain 2.88 MPa/1.0·eps_cr, regularized
+  3.46 MPa/1.6·eps_cr — identical to D44/D45).
+- **Result (dynamic, N–mm; both reach the full target u=0.12, eps=12·eps_cr, conv=True):**
+  - **regularized + dynamic** — elastic branch overlaps the reference (K0), peak **4.50 MPa** (the diagonal
+    overstrength, accepted per D39), then a CLEAN descending branch spanning the reference's strain range
+    (both heading to ~0 near eps≈1.1–1.2e-3). The lattice now FOLLOWS the reference — the original goal
+    ("I can't see the lattice follow the reference"). This cleanly reproduces the D39 default on the
+    staged foundation (elastic baseline → plastic → regularization → dynamic).
+  - **plain + dynamic** — full branch too, peak **3.51 MPa**, brittle snap + dynamic ringing (the D38
+    plain-Concrete02 result); regularization is what makes the descending branch smooth and aligned.
+  - Confirms the two-part fix: regularization (localization) + dynamic relaxation (mechanism) together are
+    necessary and sufficient for the lattice to trace and follow the reference's softening branch.
+- **Status:** accepted. Example-layer only (`plastic.py`); backend and tests untouched (`run_pushover_dynamic`
+  reused as-is). Output → `.../cube_tension_plastic[_reg]_dynamic.png`. The cube staged rebuild (D42→D46)
+  is complete: elastic match → Concrete02 elastic branch → plain static (mechanism) → regularization
+  (localization fix) → dynamic (full aligned branch). Peak overstrength (~1.5×) left uncorrected per D39
+  (the D40/D41 area/strength peak corrections remain available if wanted).
