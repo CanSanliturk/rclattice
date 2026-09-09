@@ -84,6 +84,7 @@ class Model:
     supports: list[Support] = field(default_factory=list)
     loads: list[Load] = field(default_factory=list)
     masses: dict[int, tuple[float, ...]] = field(default_factory=dict)  # node id -> per-DOF mass
+    steel_nodes: set[int] = field(default_factory=set)   # ids of DUPLICATED bar nodes (bond only)
 
     def add_node(self, node_id: int, coords: tuple[float, ...]) -> Node:
         if len(coords) != self.ndm:

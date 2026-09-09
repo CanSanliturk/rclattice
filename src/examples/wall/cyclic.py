@@ -24,6 +24,15 @@ A predictable, diagnostic direction of error follows: with perfect bond the bars
 unit drift, so this model should yield EARLIER than the measured 0.30% drift and run STIFFER after
 cracking. Seeing that is the model behaving correctly given its assumptions, not a defect.
 
+HOW THE PROTOCOL IS DRIVEN (`--solver dynamic`). A static path-follower stalls near 0.3% drift on
+a cracking lattice, so the history is imposed as a transient solve. Two settings then decide whether
+the recorded base shear is the wall's or the solver's, and both are physical rather than tuned
+(`specimen.QUASI_STATIC_RATE` / `DAMPING_RATIO`, D62): the drive runs at 2.0 mm/s at the actuator,
+and damping is 5% of critical — the value for cracked RC, not the near-critical setting dynamic
+relaxation is usually run at. The leftover is MEASURED, not assumed: `--quasi-static` (on by
+default) reports the inertia + damping the drive and base reactions fail to balance as a percentage
+of the peak shear, which is the number that licences the two settings above.
+
 Output: examples/output/wall/wall_cyclic[_elastic].png. Units: N, mm.
 Run as `python examples/wall/cyclic.py [--drift 0.01] [--compression crushing|elastic]`.
 """
@@ -37,9 +46,11 @@ from rclattice import viz
 from rclattice.builders import select_nodes
 from rclattice.opensees import cyclic_protocol, run_cyclic, run_cyclic_dynamic
 
-from build import calibrate, nonlinear_wall_lattice
+import gauge
+from build import calibrate, nonlinear_wall_lattice, report_calibration
 from specimen import (
-    A_SHEAR, EPS, HORIZON, LW, MESH, OUT, base_nodes, control_node, lateral_loads, protocol,
+    A_SHEAR, DAMPING_RATIO, EPS, GAUGE_H, HORIZON, LW, MESH, OUT, QUASI_STATIC_RATE, base_nodes,
+    control_node, gauge_nodes, gauge_strains, lateral_loads, neutral_axis, protocol,
 )
 
 # Measured response of SW-NC-FF, for annotation only — never a calibration target.
@@ -97,14 +108,14 @@ def backbone(disp, shear):
 
 def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float = MESH,
          horizon: float = HORIZON, steps_per_mm: float = 4.0, gf_factor: float = 1.0,
-         solver: str = "static", periods: float = 48.0, damping: float = 0.8,
-         rate: float | None = None) -> None:
+         solver: str = "static", periods: float | None = None,
+         damping: float = DAMPING_RATIO, rate: float = QUASI_STATIC_RATE,
+         quasi_static: bool = True, gauge_every: int = 200,
+         draw_model: bool = False) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
     cal = calibrate(mesh_size=mesh_size, horizon=horizon)
-    print(f"Aydin energy balance: A_t = {cal.area:,.1f} mm^2 "
-          f"= {cal.area / (mesh_size * 200.0):.4f} * (thickness * mesh)   "
-          f"[horizon {horizon}, lattice nu = {cal.nu_consistent:.3f}]")
+    report_calibration(cal, mesh_size=mesh_size, horizon=horizon)
     if gf_factor != 1.0:
         print(f"tension stiffening: Gf scaled x{gf_factor:g} (softening gentler than plain concrete)")
 
@@ -114,6 +125,12 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
     print(f"nonlinear lattice (compression={compression}): {len(model.nodes)} nodes, "
           f"{struts} concrete struts + {len(model.elements) - struts} rebar struts")
 
+    if draw_model:
+        # Drawn BEFORE the run: on a multi-hour analysis the model figure is the thing you want to
+        # check first, not after. `draw.main` rebuilds the same model from the same calibration.
+        import draw as draw_mod
+        draw_mod.main(mesh_size=mesh_size, horizon=horizon)
+
     peaks, cycles = protocol(drift)
     history = cyclic_protocol(peaks, cycles_per_level=cycles)
     print(f"protocol to {drift:.2%} drift: {len(peaks)} levels "
@@ -121,6 +138,14 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
           f"{len(history)} reversals")
 
     ctrl, base = control_node(model), base_nodes(model)
+
+    # Vertical strain gauge over the wall base (D63): two aligned node rows GAUGE_H apart, asked
+    # for as ONE concatenated list (bottom then top) so a single probe covers both. dof 2 = uy.
+    gx, g_bot, g_top = gauge_nodes(model)
+    probe = (list(g_bot) + list(g_top), 2)
+    print(f"base strain gauge: {len(gx)} columns across x = {gx[0]:.0f}..{gx[-1]:.0f} mm, "
+          f"{GAUGE_H:.0f} mm gauge, sampled every {gauge_every} steps (+ every reversal)")
+
     t0 = time.time()
     if solver == "dynamic":
         # Dynamic relaxation through the whole reversing history (D49). A static path-follower
@@ -132,14 +157,20 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
                   f"  [{time.time() - t0:6.0f}s]", flush=True)
 
         res = run_cyclic_dynamic(model, control_node=ctrl, control_dof=1, history=history,
-                                 drive_nodes=drive, base_nodes=base, periods_to_peak=periods,
-                                 rate=rate, steps_per_period=30, damping_ratio=damping,
-                                 progress=report)
-        print(f"  T1 = {res['T1']:.4f} s, drive rate = {res['rate']:.4g} mm/s, "
-              f"{res['steps']} steps")
+                                 drive_nodes=drive, base_nodes=base,
+                                 periods_to_peak=periods if periods is not None else 48.0,
+                                 # --rate 0 hands control back to the legacy --periods route
+                                 rate=rate if rate > 0.0 else None,
+                                 steps_per_period=30, damping_ratio=damping,
+                                 quasi_static=quasi_static, node_history=probe,
+                                 node_history_every=gauge_every, progress=report)
+        print(f"  T1 = {res['T1']:.4f} s, drive rate = {res['rate']:.4g} mm/s "
+              f"= {res['rate'] * res['T1']:.4g} mm per fundamental period, "
+              f"damping {damping:.0%} of critical, {res['steps']} steps")
     else:
         res = run_cyclic(model, lateral_loads=lateral_loads(model), control_node=ctrl,
-                         control_dof=1, history=history, dU=1.0 / steps_per_mm, base_nodes=base)
+                         control_dof=1, history=history, dU=1.0 / steps_per_mm, base_nodes=base,
+                         node_history=probe, node_history_every=gauge_every)
     elapsed = time.time() - t0
 
     if not res["disp"]:
@@ -165,6 +196,23 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
     print(f"  paper SW-NC-FF         +{PAPER_PEAK_KN:.1f} / -209.4 kN at {PAPER_PEAK_DRIFT:.2%}"
           f"   -> model/test = {peak_p / 1e3 / PAPER_PEAK_KN:.3f}")
 
+    # How much of that shear is the wall and how much is the solver: the inertia + damping the drive
+    # and base reactions fail to balance (D62). Reported without a pass/fail threshold on purpose —
+    # this runner's HHT(0.7) leaves a large numerical-dissipation term in the residual that does NOT
+    # bias the recorded shear (on an elastic wall it reads ~2x the base shear while reproducing the
+    # static answer to 0.24%). The number is for comparing runs of THIS solver, where it is linear
+    # in --rate and falls with --damping once cracking starts.
+    contam = None
+    if res.get("dynamic"):
+        dyn = res["dynamic"]
+        peak_dyn = max(abs(d) for d in dyn)
+        rms = (sum(d * d for d in dyn) / len(dyn)) ** 0.5
+        ref = max(abs(peak_p), abs(peak_n))
+        contam = peak_dyn / ref if ref else float("inf")
+        print(f"  inertia + damping      {peak_dyn / 1e3:.1f} kN peak, {rms / 1e3:.1f} kN rms "
+              f"= {contam:.1%} of peak shear  (compare across runs of this solver, not absolutely "
+              f"— HHT inflates it)")
+
     # Residual displacement at the end of the last completed unload — a consequence of the
     # debonding mechanism this model omits, so reported as a known-unfair comparison.
     print(f"  residual displacement  {res['disp'][-1]:+.2f} mm  (test: negligible — its "
@@ -179,7 +227,16 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
                        + ("_dynamic" if solver == "dynamic" else "")) + "_data.json")
     datapath.write_text(json.dumps({
         "drift_pct": d_pct, "shear_kN": s_kn, "compression": compression, "solver": solver,
-        "drift_target": drift, "mesh": mesh_size, "horizon": horizon, "rate": rate,
+        "drift_target": drift, "mesh": mesh_size, "horizon": horizon,
+        "rate": res.get("rate", rate), "damping": damping, "T1": res.get("T1"),
+        # The residual is a DIAGNOSTIC, so it is stored decimated at the gauge stride: a 4%
+        # protocol is ~1.8M steps, and three full-length arrays would make this file ~100 MB.
+        # Its peak/rms summary is kept exactly, which is what the reporting above actually uses.
+        "dynamic_kN_decimated": [d / 1e3 for d in res.get("dynamic", [])[::max(1, gauge_every)]],
+        "dynamic_every": gauge_every,
+        "dynamic_peak_kN": (max(abs(d) for d in res["dynamic"]) / 1e3) if res.get("dynamic") else None,
+        "dynamic_share": contam,
+        "gauge": gauge.payload(res, gx),
         "converged": res["converged"], "steps": res.get("steps"), "elapsed_s": elapsed,
     }))
     print(f"saved raw response to {datapath}")
@@ -219,6 +276,24 @@ def main(*, compression: str = "crushing", drift: float = 0.01, mesh_size: float
               "(test points reconstructed from reported values, not digitized loops)")
     print(f"saved backbone to {bb}")
 
+    # Vertical strain profile across the base section, one curve per protocol drift level (D63).
+    g_drift, g_strain = gauge.reduce_history(res, gx)
+    if g_drift:
+        levels = [p / A_SHEAR * 100.0 for p in peaks]
+        idx = gauge.select_levels(g_drift, levels)
+        # The LATEST state, always drawn whatever the protocol levels resolved to. On a run that
+        # stopped early this is the only profile that reflects where the analysis actually got to.
+        if (len(g_drift) - 1) not in idx:
+            idx.append(len(g_drift) - 1)
+        sp = OUT / f"{stem}_strain_profile.png"
+        rows = gauge.figure(
+            g_drift, g_strain, gx, indices=idx, savepath=sp,
+            title="SW-NC-FF — vertical strain across the base section, at each protocol level")
+        print(f"\nbase strain gauge: {len(g_drift)} profiles recorded, {len(idx)} drawn "
+              f"(protocol levels + the latest state, {g_drift[-1]:+.3f}% drift)")
+        gauge.print_table(rows)
+        print(f"saved strain profile to {sp}")
+
 
 if __name__ == "__main__":
     import argparse
@@ -242,15 +317,31 @@ if __name__ == "__main__":
     p.add_argument("--solver", choices=("static", "dynamic"), default="static",
                    help="'static' (DisplacementControl; stalls near 0.3%% drift) or 'dynamic' "
                         "(dynamic relaxation — rides through the softening instability, D49)")
-    p.add_argument("--periods", type=float, default=48.0,
-                   help="dynamic solver: fundamental periods to traverse the largest amplitude. "
-                        "Higher = slower = less inertial contamination of the recorded base shear")
-    p.add_argument("--damping", type=float, default=0.8, help="dynamic solver: damping ratio")
-    p.add_argument("--rate", type=float, default=None,
-                   help="dynamic solver: drive speed in mm/s, set DIRECTLY (preferred over "
-                        "--periods, which scales with protocol amplitude and so silently drives a "
-                        "larger protocol faster). 7.6 mm/s matched the static cyclic within 1%%")
+    p.add_argument("--rate", type=float, default=QUASI_STATIC_RATE,
+                   help=f"dynamic solver: drive speed in mm/s at the actuator level (default "
+                        f"{QUASI_STATIC_RATE:g}). The inertial and damping forces riding in the "
+                        "recorded base shear are LINEAR in this, and so is the run time; 7.6 was "
+                        "the value once checked against the static cyclic to 1%%")
+    p.add_argument("--periods", type=float, default=None,
+                   help="dynamic solver: LEGACY alternative to --rate — derive the speed as "
+                        "max|history| / (periods * T1). Discouraged: it scales with the protocol "
+                        "amplitude, so the same setting drives the 4%% protocol four times faster "
+                        "than the 1%% one. Only used when --rate is given as 0")
+    p.add_argument("--damping", type=float, default=DAMPING_RATIO,
+                   help=f"dynamic solver: damping ratio (default {DAMPING_RATIO:g} = 5%% of "
+                        "critical, the physical value for cracked RC). Raise it only if the solve "
+                        "will not stay together — it is a viscous drag that inflates the shear")
+    p.add_argument("--no-quasi-static", dest="quasi_static", action="store_false",
+                   help="skip the inertia+damping measurement (one extra reaction sum per step)")
+    p.add_argument("--draw", dest="draw_model", action="store_true",
+                   help="also save the analysis-model lattice figure (wall_drawing.png) before "
+                        "the run starts")
+    p.add_argument("--gauge-every", type=int, default=200,
+                   help="base strain gauge: sample every N steps (default 200). Reversals are "
+                        "ALWAYS sampled on top of this, so the loop tips are exact whatever the "
+                        "stride. Keep it coarse — a 4%% protocol is ~1.8M steps")
     a = p.parse_args()
     main(compression=a.compression, drift=a.drift, mesh_size=a.mesh, horizon=a.horizon,
          steps_per_mm=a.steps_per_mm, gf_factor=a.gf_factor, solver=a.solver, periods=a.periods,
-         damping=a.damping, rate=a.rate)
+         damping=a.damping, rate=a.rate, quasi_static=a.quasi_static, gauge_every=a.gauge_every,
+         draw_model=a.draw_model)

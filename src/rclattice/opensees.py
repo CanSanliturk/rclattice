@@ -138,6 +138,10 @@ def run_pushover(
     max_iter: int = 100,
     algorithm: "tuple[str, ...]" = ("Newton",),
     element_groups=None,
+    capture: bool = False,
+    node_history=None,
+    node_history_every: int = 1,
+    equal_dof=None,
 ) -> dict:
     """Gravity (constant) → DisplacementControl pushover, recording base shear (D18/D19).
 
@@ -169,8 +173,24 @@ def run_pushover(
     gives the overturning-moment share. Lets a caller attribute base shear/overturning to element
     categories (vertical vs diagonal struts, concrete vs rebar) without any ops.* calls of its own.
 
+    `capture` and `equal_dof` mirror `run_pushover_dynamic` so the two solvers are interchangeable
+    for a caller: `capture=True` also returns the full nodal displacement field at the last step
+    ("disps_final") and at peak |base shear| ("disps_peak"), which a damage figure needs;
+    `equal_dof` is a list of `(retained, constrained, dof)` emitted as `ops.equalDOF` (a rigid
+    loading platen, say), applied before the gravity stage so it holds throughout.
+
+    `node_history=(node_ids, dof)` follows those nodes' displacement component `dof` (1-based)
+    through the run, sampled every `node_history_every` recorded steps. `dof` may be one 1-based component or a SEQUENCE of them; several dofs are recorded dof-major,
+    so `values[k*len(nodes):(k+1)*len(nodes)]` is the k-th dof and a one-dof probe is unchanged (D68).
+    It is the gauge-length probe
+    a STRAIN PROFILE needs: two aligned node rows a fixed distance apart give
+    `(u_top - u_bottom)/gauge` — exactly what a vertical LVDT pair on a wall face measures. Returned
+    as "node_history" = {"nodes", "dof", "index", "values"}, where `index` holds positions into
+    `disp`/`shear`, so each profile can be tied to the drift it was taken at.
+
     Returns {"ok", "converged", "disp": [...], "shear": [...], "control_node", "base_nodes"}, plus
-    "groups": {label: [...]} when `element_groups` is given.
+    "groups": {label: [...]} when `element_groups` is given, "disps_final"/"disps_peak" when
+    `capture` is set, and "node_history" when `node_history` is given.
     """
     ops.wipe()
     build(model)
@@ -179,6 +199,10 @@ def run_pushover(
     ops.system("BandGeneral")
     ops.numberer("RCM")
     ops.constraints("Transformation")
+
+    # Multi-point constraints before the gravity stage, so they hold for the whole analysis.
+    for retained, constrained, cdof in (equal_dof or ()):
+        ops.equalDOF(int(retained), int(constrained), int(cdof))
 
     grav = _gravity_loads(model, gravity_loads)
     if grav:
@@ -212,11 +236,22 @@ def run_pushover(
     disp: list[float] = []
     shear: list[float] = []
 
+    snap = {"peak": None, "peak_abs": -1.0}
+    probe = _node_probe(node_history)
+    nh = ({"nodes": probe[0], "dof": probe[1][0], "dofs": list(probe[1]),
+           "index": [], "values": []} if probe else None)
+
     def record() -> None:
         disp.append(control_disp())
         shear.append(base_shear())
         for label, members in (element_groups or {}).items():
             groups[label].append(sum(ops.eleForce(eid)[dof] * coef for eid, dof, coef in members))
+        if capture and abs(shear[-1]) > snap["peak_abs"]:
+            snap["peak_abs"] = abs(shear[-1])
+            snap["peak"] = _nodal_disps(model)
+        if nh is not None and (len(disp) - 1) % max(1, node_history_every) == 0:
+            nh["index"].append(len(disp) - 1)
+            nh["values"].append(_probe_sample(nh))
 
     record()
     converged = True
@@ -247,6 +282,11 @@ def run_pushover(
               "shear": shear, "control_node": control_node, "base_nodes": base}
     if element_groups is not None:
         result["groups"] = groups
+    if capture:
+        result["disps_final"] = _nodal_disps(model)
+        result["disps_peak"] = snap["peak"]
+    if nh is not None:
+        result["node_history"] = nh
     return result
 
 
@@ -286,6 +326,9 @@ def run_cyclic(
     tol: float = 1e-5,
     max_iter: int = 100,
     algorithm: "tuple[str, ...]" = ("ModifiedNewton", "-initial"),
+    node_history=None,
+    node_history_every: int = 1,
+    wipe: bool = True,
 ) -> dict:
     """Gravity (constant) → reversed-cyclic DisplacementControl, recording base shear (D48).
 
@@ -300,22 +343,60 @@ def run_cyclic(
     `run_pushover`; on exhaustion the run STOPS and returns what it traced with `converged=False`,
     so a partial hysteresis is still usable and honestly labelled.
 
+    `node_history=(node_ids, dof)` follows those nodes' displacement component `dof` (1-based),
+    sampled every `node_history_every` steps AND at every reversal. `dof` may be one 1-based component or a SEQUENCE of them; several dofs are recorded dof-major,
+    so `values[k*len(nodes):(k+1)*len(nodes)]` is the k-th dof and a one-dof probe is unchanged (D68).
+    It is the gauge-length probe a strain
+    profile needs (D63). Reversals are always captured because the loop tips are the instants the
+    profile is wanted at, and a stride alone would miss them by up to a full stride of drive.
+
     Returns {"ok", "converged", "disp", "shear", "control_node", "base_nodes", "reached"} where
-    `reached` is the number of history targets completed.
+    `reached` is the number of history targets completed, plus "node_history" =
+    {"nodes", "dof", "index", "values"} when `node_history` is given (`index` holds positions into
+    `disp`/`shear`).
     """
-    build(model)
+    # WIPE AND BUILD, like every other runner here — `build()` emits into the CURRENT domain and
+    # does not clear it (its docstring says "after ops.wipe"), so without the wipe a second
+    # run_cyclic in one process appends to the previous model, OpenSees rejects the repeated node
+    # tags, and the solve fails somewhere else entirely. This was the only model-building runner
+    # missing it.
+    #
+    # `wipe=False` HANDS THE DOMAIN TO THE CALLER, and skips the build with it. The case that
+    # matters is gravity applied SEPARATELY: `run_gravity` is standalone (it wipes, builds, and
+    # leaves the model built and loaded), so wiping here would discard that state while rebuilding
+    # on top of it would collide on node tags — which is why that pairing never worked. With
+    # wipe=False neither happens and the domain is analysed as it stands; pass `gravity_loads=None`
+    # too, or gravity is applied a second time.
+    #
+    # The ORDINARY path remains this runner's own `gravity_loads`, applied after the build and held
+    # constant by the `loadConst` below.
+    if wipe:
+        ops.wipe()
+        build(model)
+    elif not ops.getNodeTags():
+        raise RuntimeError(
+            "run_cyclic(wipe=False) analyses the domain the CALLER has already built (e.g. via "
+            "run_gravity), but the domain is empty. Either build it first or leave wipe=True.")
     base = list(base_nodes) if base_nodes is not None else [s.node for s in model.supports]
 
     ops.system("BandGeneral")
     ops.numberer("RCM")
     ops.constraints("Transformation")
 
-    grav = _gravity_loads(model, gravity_loads)
-    if grav:
-        if _apply_gravity(model, grav, gravity_steps, tol) != 0:
-            return {"ok": -1, "converged": False, "stage": "gravity", "disp": [], "shear": [],
-                    "control_node": control_node, "base_nodes": base, "reached": 0}
+    # Under `wipe=False` the caller owns the domain AND its loads, so gravity is NOT applied here:
+    # `_gravity_loads(model, None)` falls back to the MODEL's own loads, which after a separate
+    # `run_gravity` would apply gravity a second time and collide on the time-series tag. What is
+    # still needed is to freeze whatever the caller applied, so the displacement control below
+    # starts from a held gravity state — that is the `loadConst` this branch keeps.
+    if not wipe:
         ops.loadConst("-time", 0.0)
+    else:
+        grav = _gravity_loads(model, gravity_loads)
+        if grav:
+            if _apply_gravity(model, grav, gravity_steps, tol) != 0:
+                return {"ok": -1, "converged": False, "stage": "gravity", "disp": [], "shear": [],
+                        "control_node": control_node, "base_nodes": base, "reached": 0}
+            ops.loadConst("-time", 0.0)
 
     ops.timeSeries("Linear", 2)
     ops.pattern("Plain", 2, 2)
@@ -333,9 +414,27 @@ def run_cyclic(
         ops.reactions()
         return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
 
-    disp: list[float] = [control_disp()]
-    shear: list[float] = [base_shear()]
+    probe = _node_probe(node_history)
+    nh = ({"nodes": probe[0], "dof": probe[1][0], "dofs": list(probe[1]),
+           "index": [], "values": []} if probe else None)
+    disp: list[float] = []
+    shear: list[float] = []
 
+    def record() -> None:
+        """Append one converged step. Also samples the node probe — on the stride, and always at a
+        REVERSAL, since the loop tips are the instants a strain profile is wanted at and a stride
+        alone would miss them by up to `node_history_every` steps of drive."""
+        disp.append(control_disp())
+        shear.append(base_shear())
+        if nh is None:
+            return
+        turned = (len(disp) >= 3
+                  and (disp[-1] - disp[-2]) * (disp[-2] - disp[-3]) < 0.0)
+        if turned or (len(disp) - 1) % max(1, node_history_every) == 0:
+            nh["index"].append(len(disp) - 1)
+            nh["values"].append(_probe_sample(nh))
+
+    record()
     converged, reached = True, 0
     for goal in history:
         sign = 1.0 if goal >= control_disp() else -1.0
@@ -343,8 +442,7 @@ def run_cyclic(
         ops.integrator("DisplacementControl", control_node, control_dof, du)
         while sign * (goal - control_disp()) > 1e-9 * (abs(goal) + 1.0):
             if ops.analyze(1) == 0:
-                disp.append(control_disp())
-                shear.append(base_shear())
+                record()
                 continue
             sub_ok = False
             for spec in (algorithm, ("KrylovNewton",), ("NewtonLineSearch", "-type", "Bisection")):
@@ -352,8 +450,7 @@ def run_cyclic(
                 for nsub in (5, 20, 50):
                     ops.integrator("DisplacementControl", control_node, control_dof, du / nsub)
                     if ops.analyze(nsub) == 0:
-                        disp.append(control_disp())
-                        shear.append(base_shear())
+                        record()
                         sub_ok = True
                         break
                 if sub_ok:
@@ -367,8 +464,11 @@ def run_cyclic(
             break
         reached += 1
 
-    return {"ok": 0 if converged else -1, "converged": converged, "disp": disp, "shear": shear,
-            "control_node": control_node, "base_nodes": base, "reached": reached}
+    out = {"ok": 0 if converged else -1, "converged": converged, "disp": disp, "shear": shear,
+           "control_node": control_node, "base_nodes": base, "reached": reached}
+    if nh is not None:
+        out["node_history"] = nh
+    return out
 
 
 def run_pushover_arclength(
@@ -499,6 +599,72 @@ def run_pushover_arclength(
             "control_node": control_node, "base_nodes": base}
 
 
+def _nodal_disps(model: Model) -> dict:
+    """Snapshot of every node's displacement vector, {node_id: [u1..u_ndf]} (viz's `disp` format)."""
+    return {nid: [ops.nodeDisp(nid, d) for d in range(1, model.ndf + 1)] for nid in model.nodes}
+
+
+def nodal_displacements(model: Model) -> dict:
+    """The current displacement field, `{node_id: [u1..u_ndf]}` — public form of the snapshot.
+
+    `capture=True` on the runners returns this at two instants (peak and final), but only once the
+    run RETURNS. A run that is killed, diverges or is aborted mid-way leaves nothing behind, which
+    is exactly when a damage picture is most wanted. Calling this from a `progress` callback lets a
+    caller dump the field periodically, so an interrupted run still has a last known state.
+
+    Feed the result straight to `viz.strut_strains` / `viz.figure_damage`; it needs no recorder.
+    Costs one `ops.nodeDisp` per node per DOF, so call it on a progress tick, not every step.
+    """
+    return _nodal_disps(model)
+
+
+def _node_probe(node_history):
+    """Normalize the `node_history` argument to `(nodes, dofs)` or None.
+
+    `node_history` is a `(node_ids, dof)` pair naming a handful of nodes whose displacement is to be
+    followed through the analysis — the gauge-length probe a strain profile needs (D63). Unlike
+    `capture`, which snapshots the WHOLE field at two instants, this follows a few nodes through the
+    whole history, which is what a physical LVDT does.
+
+    `dof` is either ONE 1-based component (the D63 vertical gauge: one dof, one value per node) or a
+    SEQUENCE of them (D68: a diagonal gauge needs both u_x and u_y at each corner, because a chord
+    length between two moving nodes is not a function of either component alone). Multiple dofs are
+    stored dof-MAJOR — see `_probe_sample` — so a one-dof probe records exactly what it always did
+    and every existing reader keeps working unchanged.
+    """
+    if node_history is None:
+        return None
+    nodes, dof = node_history
+    dofs = (int(dof),) if isinstance(dof, (int, float)) else tuple(int(d) for d in dof)
+    if not dofs:
+        raise ValueError("node_history: at least one dof is required")
+    return [int(n) for n in nodes], dofs
+
+
+def _probe_sample(nh) -> list:
+    """One probe sample: dof-MAJOR blocks, so `values[k*len(nodes):(k+1)*len(nodes)]` is dof k.
+
+    Block-major rather than interleaved on purpose: with a single dof the record is byte-identical
+    to the pre-D68 one-dof format, so `specimen.segment_strain`-style row slicing is unaffected, and
+    with several dofs each component is still one contiguous slice.
+    """
+    return [ops.nodeDisp(n, d) for d in nh["dofs"] for n in nh["nodes"]]
+
+
+# Integrators that march WITHOUT forming or factorizing a tangent. They are conditionally stable —
+# dt must sit below 2/w_max, set by the stiffest/lightest element, not by T1 — but each step costs a
+# force recovery instead of a factorized Newton solve, which is the trade that makes them worth having
+# on a model that will not converge implicitly (D74).
+EXPLICIT_INTEGRATORS = frozenset({
+    "CentralDifference", "CentralDifferenceAlternative", "CentralDifferenceNoDamping",
+    "NewmarkExplicit", "HHTExplicit", "AlphaOS", "AlphaOSGeneralized", "KRAlphaExplicit",
+})
+
+
+def is_explicit(integrator) -> bool:
+    return bool(integrator) and str(integrator[0]) in EXPLICIT_INTEGRATORS
+
+
 def run_pushover_dynamic(
     model: Model,
     *,
@@ -515,6 +681,16 @@ def run_pushover_dynamic(
     damping_ratio: float = 0.6,
     tol: float = 1e-5,
     max_iter: int = 50,
+    capture: bool = False,
+    quasi_static: bool = False,
+    node_history=None,
+    node_history_every: int = 1,
+    progress=None,
+    progress_every: int = 200,
+    integrator=("Newmark", 0.5, 0.25),
+    element_groups=None,
+    equal_dof=None,
+    algorithm: "tuple[str, ...]" = ("Newton",),
 ) -> dict:
     """Dynamic-relaxation pushover: a quasi-static TRANSIENT solve that rides through limit
     points / local snap-backs the static Newton can't (D22, user-selected).
@@ -524,7 +700,70 @@ def run_pushover_dynamic(
     with Newmark + heavy Rayleigh damping slowly enough (`periods_to_target` fundamental periods
     to reach `target`) that inertia stays negligible — so the recorded base shear vs control
     displacement is the quasi-static pushover, but the mass/damping regularize the instability.
-    Returns {"converged", "disp", "shear", "control_node", "base_nodes"}.
+
+    `target` may be NEGATIVE to drive the control DOF backwards — a COMPRESSION pushover, say.
+    The drive speed is always a positive magnitude; its sign rides on the imposed-displacement
+    constraint, and the stop test compares magnitudes (matching `run_pushover`, D53).
+
+    `capture=True` additionally returns the FULL nodal displacement field at the last step
+    ("disps_final") and at the peak |base shear| ("disps_peak"), which is what a damage/crack-pattern
+    figure needs. Off by default: it copies the displacement vector on every new peak, which is
+    wasted work for a run that only wants the curve.
+
+    `element_groups` is the force-decomposition probe, with the same contract as `run_pushover`: a
+    dict mapping a label to a list of `(element_id, dof, coef)`. At each step it records, per label,
+    `sum(eleForce(element_id)[dof] * coef)` — a GLOBAL nodal force component the element exerts, so
+    corotational geometry is already baked in. Summing the forces the struts crossing one cut exert
+    on the nodes below it attributes the carried load to element categories (vertical vs diagonal
+    struts, say), which is how a "who is actually carrying this?" question gets answered.
+
+    `algorithm` is the PRIMARY solution algorithm (an `ops.algorithm(*algorithm)` arg tuple),
+    matching `run_pushover`. It is used for normal stepping and as the first rung of the retry
+    ladder (primary -> KrylovNewton -> NewtonLineSearch, at a tenth of the step). Plain `Newton` is
+    the default and is usually right here: unlike the static case, the mass and damping keep the
+    effective tangent positive-definite through cracking, so there is no need to iterate on the
+    initial stiffness.
+
+    `quasi_static=True` MEASURES whether the drive is slow enough, instead of assuming it. Global
+    equilibrium in the drive direction reads `S_base + S_drive = -sum_free (M.a + C.v)`, where each
+    S is the `-sum(reaction)` over that node set: the internal forces cancel globally, so whatever
+    the two constrained sets do NOT balance is exactly the inertial + damping force riding in the
+    recorded base shear. It costs one extra reaction sum over the drive nodes per step and returns
+    that residual as "dynamic"; `max|dynamic| / max|shear|` is the contamination of the result.
+    It assumes `base_nodes` and `drive_nodes` between them cover EVERY constrained DOF in the drive
+    direction (true whenever the supports are the base row) — any other restraint would leak into
+    the residual and read as contamination that is not there.
+
+    `equal_dof` ties degrees of freedom together before the analysis: a list of
+    `(retained_node, constrained_node, dof)` emitted as `ops.equalDOF`. Use it for a rigid loading
+    platen — tie a whole face's vertical DOF to one node and drive only that node, so the face is
+    forced to stay flat instead of each node being told independently where to go. Requires the
+    `Transformation` constraint handler, which this runner already sets.
+
+    `node_history=(node_ids, dof)` follows those nodes' displacement component `dof` (1-based),
+    `integrator` is the time integrator as an `ops.integrator(*args)` tuple. The default
+    `("Newmark", 0.5, 0.25)` is average-acceleration: unconditionally stable for a LINEAR system and
+    exactly energy-conserving, which means it sustains a spurious high-frequency mode indefinitely
+    rather than bleeding it away. `run_cyclic_dynamic` instead uses `("HHT", 0.7)`, whose alpha < 1
+    adds numerical damping aimed squarely at the high-frequency response a cracking lattice
+    generates. On a model whose struts are very stiff relative to their tributary mass — so that
+    local node-pair modes sit far above T1 — the two integrators can behave completely differently
+    through cracking, and a screen run on one certifies nothing about the other (D69).
+
+    `progress(step, nsteps, disp, shear)` is called every `progress_every` steps, mirroring
+    `run_cyclic_dynamic`. Without it a dynamic pushover is silent for its whole duration, which on a
+    redirected log means no way to tell a slow run from a stuck one.
+
+    `node_history=(node_ids, dof)` is
+    sampled every `node_history_every` recorded steps — the gauge-length probe a STRAIN PROFILE
+    needs (D63): two aligned node rows a fixed distance apart give `(u_top - u_bottom)/gauge`,
+    which is what a vertical LVDT pair on a wall face measures. Unlike `capture`, which snapshots
+    the whole field at two instants, this follows a few nodes through the whole run.
+
+    Returns {"converged", "disp", "shear", "control_node", "base_nodes", "rate", "T1"}, plus
+    "disps_final"/"disps_peak" when `capture` is set, "dynamic" when `quasi_static` is set,
+    "node_history" = {"nodes", "dof", "index", "values"} when `node_history` is given (`index`
+    holds positions into `disp`/`shear`), and "groups" when `element_groups` is given.
     """
     if not model.masses:
         raise ValueError("run_pushover_dynamic requires nodal mass on the model")
@@ -552,6 +791,11 @@ def run_pushover_dynamic(
     ops.numberer("RCM")
     ops.system("BandGeneral")
 
+    # Multi-point constraints go on AFTER wipeAnalysis (which clears the analysis aggregation, not
+    # the domain) and BEFORE the eigen solve, so the tied DOFs are reflected in T1 and the damping.
+    for retained, constrained, cdof in (equal_dof or ()):
+        ops.equalDOF(int(retained), int(constrained), int(cdof))
+
     # fundamental frequency sets the (quasi-static) loading rate, step, and Rayleigh damping
     try:                                     # the default solver is far faster than fullGenLapack
         lam1 = ops.eigen(1)[0]
@@ -567,21 +811,38 @@ def run_pushover_dynamic(
     drive_rate = float(rate) if rate is not None else abs(target) / (periods_to_target * T1)
     if drive_rate <= 0.0:
         raise ValueError(f"drive rate must be positive, got {drive_rate}")
+    # `drive_rate` is a SPEED (positive); the direction rides on the sp() coefficient below, so a
+    # negative `target` (e.g. a compression pushover) drives backwards instead of stopping at once.
+    sign = 1.0 if target >= 0.0 else -1.0
     total_time = abs(target) / drive_rate
     # Rayleigh on the INITIAL stiffness (3rd arg), never the current tangent (2nd): a betaK term
     # rides the committed tangent, so when struts crack at speed the damping force explodes and
     # diverges the solve (D49). betaKinit gives the same damping from a matrix that never collapses.
-    ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
+    # UNDER AN EXPLICIT INTEGRATOR THE betaKinit TERM MUST GO. Stiffness-proportional damping adds
+    # xi = betaK*w_max/2 at the highest mode, and the stable step shrinks by (sqrt(1+xi^2) - xi) —
+    # with these lattices that is a factor of ~90, which would make an explicit run slower than the
+    # implicit one it is meant to replace. Mass-proportional damping costs nothing in stability.
+    if is_explicit(integrator):
+        ops.rayleigh(damping_ratio * w1, 0.0, 0.0, 0.0)
+    else:
+        ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
 
-    # impose the ramped lateral displacement on the drive nodes (disp = rate * t)
+    # impose the ramped lateral displacement on the drive nodes (disp = sign * rate * t)
     ops.timeSeries("Linear", 3)
     ops.pattern("Plain", 3, 3)
     for nid in drive:
-        ops.sp(nid, control_dof, drive_rate)
+        ops.sp(nid, control_dof, sign * drive_rate)
 
-    ops.test("NormDispIncr", tol, max_iter)
-    ops.algorithm("Newton")
-    ops.integrator("Newmark", 0.5, 0.25)
+    if is_explicit(integrator):
+        # A diagonal (lumped-mass) system is the point of an explicit march: no factorization. The
+        # algorithm is Linear because there is nothing to iterate — the step is an explicit update.
+        ops.system("Diagonal")
+        ops.test("NormDispIncr", tol, 1)
+        ops.algorithm("Linear")
+    else:
+        ops.test("NormDispIncr", tol, max_iter)
+        ops.algorithm(*algorithm)
+    ops.integrator(*integrator)
     ops.analysis("Transient")
 
     def cdisp():
@@ -591,26 +852,81 @@ def run_pushover_dynamic(
         ops.reactions()
         return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
 
+    def dynamic_residual():
+        """Inertia + damping riding in the recorded shear. Call right after `base_shear` — it
+        reuses that `ops.reactions()` rather than recomputing the whole domain."""
+        return shear[-1] - sum(ops.nodeReaction(n)[control_dof - 1] for n in drive)
+
+    groups: dict[str, list[float]] = {label: [] for label in (element_groups or {})}
+
+    def record_groups() -> None:
+        for label, members in (element_groups or {}).items():
+            groups[label].append(sum(ops.eleForce(eid)[dof] * coef for eid, dof, coef in members))
+
+    probe = _node_probe(node_history)
+    nh = ({"nodes": probe[0], "dof": probe[1][0], "dofs": list(probe[1]),
+           "index": [], "values": []} if probe else None)
+
+    def record_probe() -> None:
+        if nh is not None and (len(disp) - 1) % max(1, node_history_every) == 0:
+            nh["index"].append(len(disp) - 1)
+            nh["values"].append(_probe_sample(nh))
+
     disp = [cdisp()]; shear = [base_shear()]
+    dynamic = [dynamic_residual()] if quasi_static else []
+    record_probe()
+    record_groups()
     converged = True
     nsteps = int(round(total_time / dt))
-    for _ in range(nsteps):
+    goal = abs(target)
+    disps_peak, peak_abs = (_nodal_disps(model) if capture else None), abs(shear[0])
+    explicit = is_explicit(integrator)
+    for _istep in range(nsteps):
         if ops.analyze(1, dt) != 0:
+            if explicit:
+                # An explicit step does not "fail to converge" — it goes unstable, and retrying with
+                # a different algorithm cannot help. The fix is a smaller dt, which is the caller's.
+                converged = False
+                break
             sub_ok = False
-            for algo in ("KrylovNewton", "NewtonLineSearch"):
-                ops.algorithm(algo)
+            for algo in (("KrylovNewton",), ("NewtonLineSearch",)):
+                ops.algorithm(*algo)
                 if ops.analyze(10, dt / 10.0) == 0:
                     sub_ok = True
                     break
-            ops.algorithm("Newton")
+            ops.algorithm(*algorithm)
             if not sub_ok:
                 converged = False
                 break
         disp.append(cdisp()); shear.append(base_shear())
-        if cdisp() >= target - 1e-9:
+        if quasi_static:
+            dynamic.append(dynamic_residual())
+        record_probe()
+        record_groups()
+        if capture and abs(shear[-1]) > peak_abs:
+            peak_abs = abs(shear[-1])
+            disps_peak = _nodal_disps(model)
+        if progress is not None and (_istep + 1) % max(1, progress_every) == 0:
+            progress(_istep + 1, nsteps, disp[-1], shear[-1])
+        if sign * cdisp() >= goal - 1e-9:
             break
-    return {"converged": converged, "disp": disp, "shear": shear,
-            "control_node": control_node, "base_nodes": base}
+    out = {"integrator": tuple(integrator),          # PROVENANCE (D70), see run_cyclic_dynamic
+           "converged": converged, "disp": disp, "shear": shear,
+           "control_node": control_node, "base_nodes": base, "rate": drive_rate, "T1": T1,
+           # The marched step. `disp`/`shear` are sampled every step, so `dt` is what turns a
+           # sample index into a TIME — needed to smooth a recorded series over a physical window
+           # (a released crack or a ruptured bar rings locally at periods far below T1, D92).
+           "dt": dt}
+    if quasi_static:
+        out["dynamic"] = dynamic
+    if nh is not None:
+        out["node_history"] = nh
+    if capture:
+        out["disps_final"] = _nodal_disps(model)
+        out["disps_peak"] = disps_peak
+    if element_groups is not None:
+        out["groups"] = groups
+    return out
 
 
 def run_cyclic_dynamic(
@@ -630,7 +946,13 @@ def run_cyclic_dynamic(
     damping_modes: int = 5,
     tol: float = 1e-5,
     max_iter: int = 50,
+    quasi_static: bool = False,
+    node_history=None,
+    node_history_every: int = 1,
+    capture: bool = False,
     progress=None,
+    progress_every: int = 200,
+    integrator=("HHT", 0.7),
 ) -> dict:
     """Dynamic-relaxation REVERSED-CYCLIC analysis (D49): the cyclic sibling of
     `run_pushover_dynamic`.
@@ -642,7 +964,7 @@ def run_cyclic_dynamic(
     Mechanism: the displacement history is carried by a `Path` time series and imposed on
     `drive_nodes` through single-point constraints, so one continuous transient solve traces every
     cycle — no pattern teardown at reversals, and the imposed displacement stays continuous across
-    them. The model is marched with Newmark plus heavy Rayleigh damping.
+    them. The model is marched with `integrator` (HHT(0.7) by default) plus heavy Rayleigh damping.
 
     QUASI-STATIC RATE — the parameter that decides whether the answer means anything. The recorded
     base shear is a sum of REACTIONS, which in a transient solve include inertial and damping
@@ -657,11 +979,53 @@ def run_cyclic_dynamic(
     protocols. Calibrate it once by running a small-amplitude cycle both statically and
     dynamically: when the peak shears agree, the rate is slow enough.
 
+    `quasi_static=True` MEASURES that, instead of leaving it to the calibration argument above.
+    Global equilibrium in the drive direction reads `S_base + S_drive = -sum_free (M.a + C.v)`,
+    where each S is the `-sum(reaction)` over that node set: internal forces cancel globally, so
+    whatever the two constrained sets do NOT balance is exactly the inertial + damping force riding
+    in the recorded base shear. (The horizontal external load is zero — gravity is vertical and
+    held — so nothing else enters the sum.) It costs one extra reaction sum over the drive nodes
+    per step, reusing the `ops.reactions()` the base shear already triggered, and returns the
+    residual as "dynamic". It assumes `base_nodes` and `drive_nodes` between them cover EVERY
+    constrained DOF in the drive direction (true whenever the supports are the base row) — any other
+    restraint would leak into the residual and read as contamination that is not there.
+
+    READ IT RELATIVELY, NOT ABSOLUTELY (D62). The residual is the instantaneous unbalance at the
+    COMMITTED state, and the HHT integrator below leaves a large numerical-dissipation term there
+    that does NOT bias the recorded shear: on an elastic wall this runner reads a residual of twice
+    the base shear while reproducing the static answer to 0.24%, where the Newmark
+    `run_pushover_dynamic` reads 27% for a 2.6% error. So `max|dynamic|/max|shear|` compares two
+    runs OF THE SAME RUNNER (it is linear in `rate`, and falls with `damping_ratio` once cracking
+    starts); it is not a portable error estimate. For an absolute check, drive an ELASTIC model and
+    compare the recorded shear against the static solution.
+
+    `integrator` is the time integrator as an `ops.integrator(*args)` tuple, defaulting to the
+    implicit `("HHT", 0.7)`. Pass `("CentralDifference",)` for an EXPLICIT march (D74): ~45x cheaper
+    per step against ~20x more steps, so ~2.7x faster end to end, and it needs no tangent, which is
+    what lets it walk through the softening a Newton solve has to converge past. THREE THINGS CHANGE
+    AUTOMATICALLY under it — the `betaKinit` damping term is dropped (it would shrink the stable
+    step ~90x), the solver becomes Diagonal + Linear, and the implicit sub-step rescue ladder is
+    skipped (a failed explicit step is instability, not non-convergence). THE CALLER MUST STILL SIZE `steps_per_period`
+    FROM `builders.critical_time_step`, NOT from T1: an explicit march is only conditionally stable,
+    and a step sized off T1 is typically 15-20x too large, which diverges rather than converging
+    slowly.
+
     Cost scales as `total_path * periods_to_peak * steps_per_period / max|history|`, so a full
     protocol is tens of thousands of steps — hours, not minutes. `progress(i, nsteps, disp, shear)`
-    is called every 200 steps if given, so a long run can report where it is.
+    is called every `progress_every` steps if given, so a long run can report where it is.
 
-    Returns {"converged", "disp", "shear", "control_node", "base_nodes", "steps", "rate", "T1"}.
+    `node_history=(node_ids, dof)` follows those nodes' displacement component `dof` (1-based) —
+    the gauge-length probe a STRAIN PROFILE needs (D63): two aligned node rows a fixed distance
+    apart give `(u_top - u_bottom)/gauge`, which is what a vertical LVDT pair on a wall face
+    measures. Sampled every `node_history_every` steps AND at every reversal, because the loop tips
+    are the instants a profile is wanted at and on a protocol this long a bare stride would miss
+    them by up to a full stride of drive. Keep the stride coarse: a 4% protocol is ~1.8M steps, so
+    `every=1` would hold tens of millions of floats.
+
+    Returns {"converged", "disp", "shear", "control_node", "base_nodes", "steps", "rate", "T1"},
+    plus "dynamic" when `quasi_static` is set and "node_history" =
+    {"nodes", "dof", "index", "values"} when `node_history` is given (`index` holds positions into
+    `disp`/`shear`).
     """
     if not model.masses:
         raise ValueError("run_cyclic_dynamic requires nodal mass on the model")
@@ -707,6 +1071,7 @@ def run_cyclic_dynamic(
     if drive_rate <= 0.0:
         raise ValueError(f"drive rate must be positive, got {drive_rate}")
     dt = T1 / steps_per_period
+    explicit = is_explicit(integrator)
 
     # Rayleigh damping on the INITIAL stiffness (3rd arg), never the current tangent (2nd arg).
     # A `betaK` term rides the COMMITTED tangent, so when struts crack at speed the damping force
@@ -715,7 +1080,13 @@ def run_cyclic_dynamic(
     # that never collapses. (Modal damping, D33's answer for the seismic runner, is NOT usable here:
     # dynamic relaxation needs damping near critical, and modalDamping at that level is pathological
     # — it fails to converge from the first step.)
-    ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
+    # UNDER AN EXPLICIT INTEGRATOR THE betaKinit TERM MUST GO (D74). Stiffness-proportional
+    # damping shrinks the stable step by roughly (sqrt(1+xi^2) - xi) at the highest mode, which on
+    # this lattice is a ~90x reduction — it fails as a run that never finishes, not as an error.
+    if explicit:
+        ops.rayleigh(damping_ratio * w1, 0.0, 0.0, 0.0)
+    else:
+        ops.rayleigh(damping_ratio * w1, 0.0, damping_ratio / w1, 0.0)
 
     # Piecewise-linear displacement path at constant speed `drive_rate`; the Path series then IS the
     # imposed displacement, so sp() carries a unit factor.
@@ -731,10 +1102,17 @@ def run_cyclic_dynamic(
     for nid in drive:
         ops.sp(nid, control_dof, 1.0)
 
-    ops.test("NormDispIncr", tol, max_iter)
-    ops.algorithm("Newton")
-    ops.integrator("HHT", 0.7)   # numerical damping: aids convergence through cracking and
-    ops.analysis("Transient")    # dissipates the high-frequency content modal damping leaves
+    if explicit:
+        # Nothing to iterate: the step is an explicit update, so Linear + a diagonal (lumped-mass)
+        # system is both correct and ~45x cheaper per step than a Newton solve (D74).
+        ops.system("Diagonal")
+        ops.test("NormDispIncr", tol, max_iter)
+        ops.algorithm("Linear")
+    else:
+        ops.test("NormDispIncr", tol, max_iter)
+        ops.algorithm("Newton")
+    ops.integrator(*integrator)  # HHT(0.7) by default: numerical damping aids convergence through
+    ops.analysis("Transient")    # cracking and dissipates high-frequency content
 
     def cdisp() -> float:
         return ops.nodeDisp(control_node, control_dof)
@@ -743,11 +1121,42 @@ def run_cyclic_dynamic(
         ops.reactions()
         return -sum(ops.nodeReaction(n)[control_dof - 1] for n in base)
 
+    def dynamic_residual() -> float:
+        """Inertia + damping riding in the recorded shear. Call right after `base_shear` — it
+        reuses that `ops.reactions()` rather than recomputing the whole domain."""
+        return shear[-1] - sum(ops.nodeReaction(n)[control_dof - 1] for n in drive)
+
+    probe = _node_probe(node_history)
+    nh = ({"nodes": probe[0], "dof": probe[1][0], "dofs": list(probe[1]),
+           "index": [], "values": []} if probe else None)
+
+    snap = {"peak": None, "peak_abs": -1.0}
+
+    def record_probe() -> None:
+        """Sample the gauge on the stride, and always at a REVERSAL (the loop tips)."""
+        if nh is None:
+            return
+        turned = (len(disp) >= 3
+                  and (disp[-1] - disp[-2]) * (disp[-2] - disp[-3]) < 0.0)
+        if turned or (len(disp) - 1) % max(1, node_history_every) == 0:
+            nh["index"].append(len(disp) - 1)
+            nh["values"].append(_probe_sample(nh))
+
     disp, shear = [cdisp()], [base_shear()]
+    dynamic = [dynamic_residual()] if quasi_static else []
+    record_probe()
     nsteps = max(1, int(round(total_time / dt)))
     converged = True
     for i in range(nsteps):
         if ops.analyze(1, dt) != 0:
+            if explicit:
+                # An explicit step does not "fail to converge" — it goes unstable, and retrying with
+                # a different algorithm cannot help. The fix is a smaller dt, which is the caller's.
+                # Worse, the ladder below ends by SETTING Newton, so without this gate one failed
+                # step silently converts the rest of the march to an implicit solve on a Diagonal
+                # system, with nothing in the output to say so (D80 item 6).
+                converged = False
+                break
             sub_ok = False
             for algo in ("KrylovNewton", "NewtonLineSearch"):
                 ops.algorithm(algo)
@@ -760,11 +1169,36 @@ def run_cyclic_dynamic(
                 break
         disp.append(cdisp())
         shear.append(base_shear())
-        if progress is not None and (i + 1) % 200 == 0:
+        if quasi_static:
+            dynamic.append(dynamic_residual())
+        # AFTER the append: testing `shear[-1]` before it holds this step's value snapshots the
+        # displacement field of step i against the shear of step i-1, so the "peak" field is one
+        # step stale — which matters, since D78 diagnosed the Aldemir tear off exactly this field.
+        if capture and abs(shear[-1]) > snap["peak_abs"]:
+            snap["peak_abs"] = abs(shear[-1])
+            snap["peak"] = _nodal_disps(model)
+        record_probe()
+        if progress is not None and (i + 1) % max(1, progress_every) == 0:
             progress(i + 1, nsteps, disp[-1], shear[-1])
 
-    return {"converged": converged, "disp": disp, "shear": shear, "control_node": control_node,
-            "base_nodes": base, "steps": len(disp) - 1, "rate": drive_rate, "T1": T1}
+    if capture:
+        out_capture = {"disps_final": _nodal_disps(model), "disps_peak": snap["peak"]}
+    # PROVENANCE (D70): the integrator is REPORTED, not assumed — `tuple(integrator)`, never a
+    # literal. This runner defaults to HHT(0.7) while `run_pushover_dynamic` defaults to Newmark,
+    # and a day was lost to screening one with the other's solver because neither logged which it
+    # used. A hardcoded literal here was the same failure one level down: both September cyclic
+    # runs were marched with CentralDifference and their data.json said HHT (D80 item 6).
+    out = {"integrator": tuple(integrator),
+           "converged": converged, "disp": disp, "shear": shear, "control_node": control_node,
+           "base_nodes": base, "steps": len(disp) - 1, "rate": drive_rate, "T1": T1,
+           "dt": dt}          # the marched step — see run_pushover_dynamic (D92)
+    if quasi_static:
+        out["dynamic"] = dynamic
+    if nh is not None:
+        out["node_history"] = nh
+    if capture:
+        out.update(out_capture)
+    return out
 
 
 # --- nonlinear seismic time-history (UniformExcitation) ---------------------

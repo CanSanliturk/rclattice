@@ -18,7 +18,11 @@ import math
 import numpy as np
 import pytest
 
-from rclattice.calibration import energy_balance_area, energy_balance_rectangle
+from rclattice.calibration import (
+    aydin_closed_form_C,
+    energy_balance_area,
+    energy_balance_rectangle,
+)
 from rclattice.mesh import connect_horizon, mesh_rectangle_nodes
 
 E, NU, THK, MESH = 30000.0, 1.0 / 3.0, 200.0, 50.0
@@ -30,9 +34,9 @@ def _closed_form(nu: float) -> float:
     return (1.0 / (2.0 * (1.0 - nu * nu))) / _CELL
 
 
-def _balance(length, height, mesh=MESH, *, nu=NU, e=30000.0, horizon=1.5):
+def _balance(length, height, mesh=MESH, *, nu=NU, e=30000.0, horizon=1.5, field="uniaxial"):
     return energy_balance_rectangle(length, height, mesh, E=e, nu=nu, thickness=THK,
-                                    horizon=horizon)
+                                    horizon=horizon, field=field)
 
 
 @pytest.mark.parametrize("nu", [1.0 / 3.0, 0.2, 0.0])
@@ -104,3 +108,40 @@ def test_degenerate_strut_set_is_rejected():
     coords = mesh_rectangle_nodes(1000.0, 1000.0, MESH)
     with pytest.raises(ValueError, match="degenerate"):
         energy_balance_area(np.asarray(coords), [], E=E, nu=NU, thickness=THK, area_inplane=1e6)
+
+
+# --- the published equibiaxial route (D72) -----------------------------------------------------
+#
+# Aydin, Tuncay & Binici (2019), J. Struct. Eng. 145(9): 04019091, Appendix. Different affine field
+# from the thesis route above, hence a different answer; both are selectable via `field=`.
+
+def test_closed_form_reproduces_the_published_coefficients():
+    """The paper prints C = 0.621 (horizon 1.5d) and C = 0.102 (3.01d) at its nu = 1/3."""
+    assert aydin_closed_form_C(1.5) == pytest.approx(0.621, abs=5e-4)
+    assert aydin_closed_form_C(3.01) == pytest.approx(0.102, abs=5e-4)
+
+
+def test_equibiaxial_patch_approaches_the_published_closed_form():
+    """Run over a finite patch the published balance lands within ~1% of its interior value."""
+    r = _balance(2000.0, 2000.0, field="equibiaxial")
+    C = r.EA / (E * MESH * THK)
+    assert C == pytest.approx(aydin_closed_form_C(1.5), rel=0.02)
+
+
+def test_the_two_routes_disagree_and_each_is_reported():
+    """`field` picks which balance sets `area`; the other is always reported alongside.
+
+    They are NOT the same number — at horizon 1.5 the uniaxial route returns ~6% more EA at the
+    paper's own nu = 1/3 — so a study has to say which one it used.
+    """
+    uni = _balance(2000.0, 2000.0, field="uniaxial")
+    equi = _balance(2000.0, 2000.0, field="equibiaxial")
+    assert uni.field == "uniaxial" and equi.field == "equibiaxial"
+    assert uni.area == pytest.approx(equi.area_x)
+    assert equi.area == pytest.approx(uni.area_equibiaxial)
+    assert uni.area / equi.area == pytest.approx(1.056, rel=0.01)
+
+
+def test_unknown_field_is_rejected():
+    with pytest.raises(ValueError, match="uniaxial"):
+        _balance(500.0, 500.0, field="biaxial")

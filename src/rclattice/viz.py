@@ -91,11 +91,16 @@ _KIND_STYLE = {
     "longitudinal": {"color": "C3",   "lw": 1.1, "zorder": 5, "label": "longitudinal rebar"},
     "stirrup":      {"color": "C2",   "lw": 0.9, "zorder": 4, "label": "stirrup / tie"},
     "rebar":        {"color": "C1",   "lw": 1.0, "zorder": 4, "label": "rebar"},
+    # Bond links join a steel node to the concrete nodes around it — and because the steel node sits
+    # ON a concrete node, every link lies exactly along an existing concrete strut. Drawn on top they
+    # hide the whole skeleton, so they go UNDER it, dashed and faint; to see them, draw `which="rebar"`.
+    "bond":         {"color": "C4", "lw": 0.6, "zorder": 1, "label": "bond",
+                     "ls": (0, (2, 2)), "alpha": 0.75},
 }
 _KIND_DEFAULT = {"color": "C0", "lw": 0.8, "zorder": 3, "label": "strut"}
 
 _CONCRETE_KINDS = {"concrete", "quad"}            # concrete skeleton (struts + continuum quads)
-_REBAR_KINDS = {"longitudinal", "stirrup", "rebar"}  # reinforcement
+_REBAR_KINDS = {"longitudinal", "stirrup", "rebar", "bond"}  # reinforcement (bond links included)
 
 
 def draw_model_kinds(ax, model: Model, *, which="all", title=None, legend=True, lim=None):
@@ -126,8 +131,10 @@ def draw_model_kinds(ax, model: Model, *, which="all", title=None, legend=True, 
     for kind in sorted(groups, key=lambda k: _KIND_STYLE.get(k, _KIND_DEFAULT)["zorder"]):
         st = _KIND_STYLE.get(kind, _KIND_DEFAULT)
         ax.add_collection(LineCollection(groups[kind], colors=st["color"], linewidths=st["lw"],
-                                         zorder=st["zorder"]))
-        handles.append(plt.Line2D([], [], color=st["color"], lw=max(st["lw"], 1.2)))
+                                         zorder=st["zorder"], linestyles=st.get("ls", "solid"),
+                                         alpha=st.get("alpha", 1.0)))
+        handles.append(plt.Line2D([], [], color=st["color"], lw=max(st["lw"], 1.2),
+                                  ls=st.get("ls", "solid")))
         labels.append(st["label"])
 
     ax.set_aspect("equal")
@@ -179,6 +186,144 @@ def figure_model(panels, *, savepath=None, suptitle="Analysis model", dpi=170):
     fig.tight_layout()
     if savepath:
         fig.savefig(savepath, dpi=dpi)
+    return fig
+
+
+def strut_strains(model: Model, disp) -> tuple[list, np.ndarray]:
+    """Axial strain of every 2-node element, computed from a nodal displacement dict (D53).
+
+    Returns `(elements, strains)` with `strains[k]` the axial strain of `elements[k]`. Pure
+    geometry — no `ops.*` call and no recorder — so a damage figure needs nothing from the backend
+    beyond the displacement field the runners already hand back.
+
+    Uses the LINEAR (projected) strain `eps = (u_b - u_a).v / L^2`, which is exactly the kinematics
+    of the small-displacement `Truss` element these lattices use. For `corotTruss` at large strain
+    the exact stretch would differ slightly; at the strains concrete cracks and crushes at (1e-4 to
+    1e-2) the two agree to well under a percent.
+    """
+    ids, idx, pts, _lines, _quads = _arrays(model)
+    d = _disp_array(ids, idx, disp)
+    els = [e for e in model.elements if len(e.nodes) == 2]
+    strains = np.zeros(len(els))
+    for k, e in enumerate(els):
+        a, b = idx[e.nodes[0]], idx[e.nodes[1]]
+        v = pts[b] - pts[a]
+        lsq = float(v @ v)
+        if lsq > 0.0:
+            strains[k] = float((d[b] - d[a]) @ v) / lsq
+    return els, strains
+
+
+def _draw_strain_field(ax, model, disp, strains, *, scale, norm, cmap="coolwarm"):
+    """Struts coloured by axial strain on a diverging scale. Returns the ScalarMappable."""
+    ids, idx, pts, _lines, _quads = _arrays(model)
+    dpts = pts + scale * _disp_array(ids, idx, disp)
+    els = [e for e in model.elements if len(e.nodes) == 2]
+    segs = [[dpts[idx[e.nodes[0]]], dpts[idx[e.nodes[1]]]] for e in els]
+    lc = LineCollection(segs, cmap=cmap, norm=norm, linewidths=1.0, zorder=3)
+    lc.set_array(strains)
+    ax.add_collection(lc)
+    return lc
+
+
+def _draw_crack_pattern(ax, model, disp, strains, *, scale, eps_crack, eps_crush, max_lw=3.2):
+    """Aydin-style discrete damage map: cracked struts red, crushed struts blue, intact ones faint.
+
+    Line WIDTH scales with how far past its limit a strut is, so the localized band reads as a crack
+    rather than as a uniform recolouring — the same emphasis Aydin's damage figures carry."""
+    ids, idx, pts, _lines, _quads = _arrays(model)
+    dpts = pts + scale * _disp_array(ids, idx, disp)
+    els = [e for e in model.elements if len(e.nodes) == 2]
+    segs = np.array([[dpts[idx[e.nodes[0]]], dpts[idx[e.nodes[1]]]] for e in els])
+
+    cracked = strains >= eps_crack
+    crushed = strains <= -eps_crush if eps_crush else np.zeros(len(els), dtype=bool)
+    intact = ~(cracked | crushed)
+
+    if intact.any():
+        ax.add_collection(LineCollection(list(segs[intact]), colors="0.85", linewidths=0.4, zorder=1))
+    # `ref` is the limit each mask is measured against. It must be built lazily: `eps_crush=None`
+    # is a documented mode ("classify tension only") and `-eps_crush` would raise on it before the
+    # `mask.any()` guard could skip the branch.
+    for mask, color, ref in ((crushed, "C0", -eps_crush if eps_crush else None),
+                             (cracked, "C3", eps_crack)):
+        if not mask.any() or ref is None:
+            continue
+        sev = np.abs(strains[mask] / ref)                     # 1.0 = just at the limit
+        lw = np.clip(0.9 + 1.1 * np.log10(np.maximum(sev, 1.0) + 1e-12) * 3.0, 0.9, max_lw)
+        ax.add_collection(LineCollection(list(segs[mask]), colors=color, linewidths=lw, zorder=3))
+    return int(cracked.sum()), int(crushed.sum()), len(els)
+
+
+def figure_damage(panels, *, eps_crack, eps_crush=None, savepath=None, scale=0.0,
+                  vlim=None, suptitle="Damage pattern", dpi=170,
+                  crack_label="cracked", crush_label="crushed"):
+    """Strut-level damage figure: one ROW per stage, two columns (D53).
+
+    `panels` is a list of `(title, model, disp)` — typically the same model at a couple of load
+    stages (peak, end of run). Left column is the axial-STRAIN field (blue = compression, red =
+    tension) with a shared colourbar; right column is the discrete damage pattern: struts past
+    `eps_crack` in tension drawn red, past `eps_crush` in compression blue, everything else faint.
+
+    The strain field uses a SYMMETRIC-LOG colour scale with its linear threshold at `eps_crack`.
+    That is not decoration: once a crack localizes, its strut strain is two to three orders of
+    magnitude above the surrounding elastic field, so a linear scale renders everything except the
+    single worst strut as flat grey. Symlog keeps the sub-cracking field readable near zero while
+    still resolving crack openings across decades.
+
+    `eps_crack` is the strut cracking strain (`ft/E`) and `eps_crush` the compressive limit strain
+    (`epsc0`); pass `eps_crush=None` to classify tension only. `scale` amplifies the deformed
+    geometry (0 = undeformed). `vlim` forces the outer colour limit; the default is the largest
+    |strain| across all panels, so rows stay comparable.
+
+    `crack_label`/`crush_label` name the two damage classes in the legend and panel titles. The
+    compressive default says "crushed", which is only accurate when the material can actually crush
+    — for an elastic-compression run, pass something like "past epsc0" instead.
+    """
+    computed = [(title, model, disp) + strut_strains(model, disp) for title, model, disp in panels]
+    if vlim is None:
+        vlim = max((float(np.abs(s).max()) for *_r, s in computed if len(s)), default=1.0) or 1.0
+    vlim = max(float(vlim), 2.0 * eps_crack)
+    norm = matplotlib.colors.SymLogNorm(linthresh=eps_crack, vmin=-vlim, vmax=vlim, base=10)
+
+    n = len(computed)
+    lims = [_model_lim(model) for _t, model, *_r in computed]
+    aspect = max(((ly[1] - ly[0]) / max(lx[1] - lx[0], 1e-9)) for lx, ly in lims)
+    panel_w = 5.0
+    panel_h = float(np.clip(panel_w * aspect, 2.5, 8.0))
+    fig, axes = plt.subplots(n, 2, figsize=(2 * panel_w + 1.6, n * panel_h + 1.0), squeeze=False)
+
+    mappable = None
+    for r, ((title, model, disp, _els, strains), lim) in enumerate(zip(computed, lims)):
+        left, right = axes[r][0], axes[r][1]
+        mappable = _draw_strain_field(left, model, disp, strains, scale=scale, norm=norm)
+        ncr, ncu, ntot = _draw_crack_pattern(right, model, disp, strains, scale=scale,
+                                             eps_crack=eps_crack, eps_crush=eps_crush)
+        for ax in (left, right):
+            ax.set_aspect("equal")
+            ax.set_xlim(*lim[0])
+            ax.set_ylim(*lim[1])
+            ax.set_xticks([])
+            ax.set_yticks([])
+        crush_txt = f", {ncu} {crush_label} ({ncu / ntot:.1%})" if eps_crush else ""
+        left.set_ylabel(title, fontsize=10)
+        right.set_title(f"{crack_label} {ncr}/{ntot} ({ncr / ntot:.1%}){crush_txt}", fontsize=9)
+        if r == 0:
+            left.set_title("axial strain field (symlog)", fontsize=10)
+
+    if mappable is not None:
+        cb = fig.colorbar(mappable, ax=axes[:, 0].tolist(), fraction=0.04, pad=0.02)
+        cb.set_label("axial strain (-)   compression < 0 < tension", fontsize=8)
+    handles = [plt.Line2D([], [], color="C3", lw=2.2), plt.Line2D([], [], color="0.85", lw=1.2)]
+    labels = [f"{crack_label} (eps > {eps_crack:.1e})", "intact"]
+    if eps_crush:
+        handles.insert(1, plt.Line2D([], [], color="C0", lw=2.2))
+        labels.insert(1, f"{crush_label} (eps < -{eps_crush:.1e})")
+    axes[0][1].legend(handles, labels, fontsize=7, loc="upper right", framealpha=0.85)
+
+    fig.suptitle(suptitle, fontsize=11)
+    if savepath:
+        fig.savefig(savepath, dpi=dpi, bbox_inches="tight")
     return fig
 
 
@@ -305,6 +450,55 @@ def figure_pushover(curves, *, savepath=None, xlabel="roof displacement", ylabel
     ax.grid(True, alpha=0.3)
     if any(c.get("label") for c in curves):
         ax.legend()
+    fig.tight_layout()
+    if savepath:
+        fig.savefig(savepath, dpi=130)
+    return fig
+
+
+def figure_strain_profile(profiles, *, savepath=None, gauge=None, width=None,
+                          xlabel="position across the wall, x (mm)",
+                          ylabel="average vertical strain over the gauge",
+                          title="Vertical strain profile across the section",
+                          fits=None, microstrain: bool = True):
+    """Vertical-strain profiles across a section, one curve per load level (D63).
+
+    `profiles` is a list of dicts: {"x": [...], "strain": [...], "label": str, optional "style"}.
+    `fits` (optional, parallel to `profiles`) is a list of `(curvature, _, x_zero)` as returned by
+    `specimen.neutral_axis`; each is drawn as a faint straight line with its zero crossing ticked,
+    so how far the section departs from "plane sections remain plane" is visible rather than
+    asserted. `gauge` and `width` are annotation only.
+
+    Strain is drawn in MICROSTRAIN by default — a wall base runs to a few thousand of them, and
+    reading 2.4e-3 off an axis is worse than reading 2400.
+    """
+    scale = 1e6 if microstrain else 1.0
+    unit = " (x10$^{-6}$)" if microstrain else ""
+    fig, ax = plt.subplots(figsize=(7.2, 5.0))
+    ax.axhline(0.0, color="0.35", lw=1.0, zorder=1)
+    for i, pr in enumerate(profiles):
+        style = dict(marker="o", ms=3.5, lw=1.6)
+        style.update(pr.get("style", {}))
+        line, = ax.plot(pr["x"], [e * scale for e in pr["strain"]], label=pr.get("label"),
+                        zorder=3, **style)
+        if fits is not None and i < len(fits) and fits[i] is not None:
+            slope, _mid, x0 = fits[i]
+            xa, xb = min(pr["x"]), max(pr["x"])
+            # rebuild the fitted line from its slope and zero crossing
+            if x0 == x0:                      # not nan
+                ax.plot([xa, xb], [slope * (xa - x0) * scale, slope * (xb - x0) * scale],
+                        color=line.get_color(), lw=0.8, ls=":", alpha=0.7, zorder=2)
+                if xa <= x0 <= xb:
+                    ax.plot([x0], [0.0], marker="|", ms=11, color=line.get_color(), zorder=4)
+    if width is not None:
+        ax.set_xlim(-width / 2.0 * 1.04, width / 2.0 * 1.04)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel + unit)
+    sub = "" if gauge is None else f"\naveraged over a {gauge:g} mm gauge above the base face"
+    ax.set_title(title + sub, fontsize=10)
+    ax.grid(True, alpha=0.3)
+    if any(pr.get("label") for pr in profiles):
+        ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
     if savepath:
         fig.savefig(savepath, dpi=130)

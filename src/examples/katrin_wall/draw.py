@@ -83,7 +83,7 @@ def draw(ax, parts, base_xy, *, title, ylim, show_load=True):
 def main(*, mesh_size: float = MESH, horizon: float = HORIZON) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     cal = calibrate(mesh_size=mesh_size, horizon=horizon)
-    model = wall_lattice(cal.area, mesh_size=mesh_size, horizon=horizon, nonlinear=False)
+    model = wall_lattice(cal.area, mesh_size=mesh_size, horizon=horizon)
     parts = classify(model)
     base_xy = np.array([n.coords for n in model.nodes.values() if abs(n.coords[1] + FND_H) < 1e-6])
     struts, bars = len(parts[0]), sum(len(v) for v in parts[1].values())

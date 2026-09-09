@@ -11,9 +11,11 @@ Two consequences shape how it is used here:
   * A_t = EA_t / E is INDEPENDENT of E. One calibrated area therefore serves all three concrete
     zones of this specimen (test unit / upper head / pedestal) — each zone's own modulus rides on
     its material, not on its strut area.
-  * A horizon-strut lattice is an isotropic solid at only ONE Poisson ratio. For the horizon=1.5
-    (8-neighbour) grid that value is ~0.18, close enough to concrete's 0.20 that the residual
-    error is small; `calibrate()` reports it so the assumption stays visible.
+  * The balance can match the normal-strain energy or the shear energy, not both, unless nu equals
+    `nu_consistent` — ~0.18 for the horizon=1.5 (8-neighbour) grid, close enough to concrete's 0.20
+    that the residual shear-stiffness error is small here. `nu_consistent` is NOT the lattice's
+    Poisson ratio (that is `nu_effective` ~ 0.41, and the lattice is cubic-symmetric rather than
+    isotropic at any nu — D53); `report_calibration()` prints it so the assumption stays visible.
 """
 
 from __future__ import annotations
@@ -45,6 +47,36 @@ def calibrate(*, mesh_size: float = MESH, horizon: float = HORIZON) -> EnergyBal
     """
     return energy_balance_rectangle(LW, HW, mesh_size, E=TEST_UNIT.E, nu=NU, thickness=TW,
                                     horizon=horizon)
+
+
+def report_calibration(cal: EnergyBalanceResult, *, mesh_size: float = MESH,
+                       horizon: float = HORIZON) -> None:
+    """Print the calibration outcome: the strut AREA, and the axial rigidity EA it gives each zone.
+
+    `A_t` alone is not the property the struts are built with — a truss element's stiffness is
+    `EA/L`, so the number that actually enters the model is EA, and it differs per zone even though
+    the area does not. Aydin's balance returns EA and divides by E only to make the result
+    transferable (D47), so reporting EA is reporting the calibration's own output.
+
+    Three things this makes visible that the area hides:
+      * EA is per ZONE. One area serves all three casts, but the test unit's struts are 1.6x softer
+        than the loading head's and 5.8x softer than the pedestal's.
+      * The pedestal's E is an EQUIVALENT modulus (`E * PED_W/TW`), so its EA is deliberately not a
+        material property — it stands in for a block 800 mm wide in a 200 mm-thick plane model.
+      * EA/L, not EA, is the stiffness: diagonal struts are sqrt(2) longer than orthogonal ones and
+        so are softer by that factor, from the same EA.
+    """
+    nominal = mesh_size * TW
+    print(f"Aydin energy balance (horizon {horizon}, nu = {cal.nu:.2f}): "
+          f"A_t = {cal.area:,.1f} mm^2 = {cal.area / nominal:.4f} * (thickness * mesh); "
+          f"nu_consistent = {cal.nu_consistent:.3f}")
+    print(f"  concrete strut axial rigidity  EA = E * A_t   "
+          f"[orthogonal L = {mesh_size:.0f} mm, diagonal L = {mesh_size * 2 ** 0.5:.1f} mm]")
+    for zone, grade in GRADES.items():
+        ea = grade.E * cal.area
+        note = "  (equivalent modulus, E * PED_W/TW)" if zone == "pedestal" else ""
+        print(f"    {zone:<10s} E = {grade.E:>9,.0f} MPa   EA = {ea:.4g} N   "
+              f"EA/L = {ea / mesh_size:.4g} / {ea / (mesh_size * 2 ** 0.5):.4g} N/mm{note}")
 
 
 def wall_lattice(area: float, *, mesh_size: float = MESH, horizon: float = HORIZON):

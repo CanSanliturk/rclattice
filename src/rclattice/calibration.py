@@ -194,6 +194,29 @@ def combined_rms(
 #
 # Note EA_t is proportional to E, so the calibrated AREA A_t = EA_t / E is INDEPENDENT of E — one
 # area serves every material zone of a model as long as nu, thickness and grid spacing are uniform.
+#
+# TWO AFFINE FIELDS, TWO ANSWERS (`field=`). The balance is only defined once you say WHICH field
+# both sides are evaluated under, and the thesis and the journal paper do not use the same one:
+#
+#   "uniaxial"    (default, D47) — eps_x = e with the transverse strain RESTRAINED (eps_y = 0).
+#                 The continuum side is then W = E e^2 / (2 (1 - nu^2)) per unit volume.
+#
+#   "equibiaxial" (D72) — the published route: Aydin, Tuncay & Binici (2019), J. Struct. Eng.
+#                 145(9): 04019091, Appendix "Stiffness of Truss Elements", Eqs (3)-(6). Equal
+#                 stresses in both directions give eps_x = eps_y = e = sigma (1-nu)/E, so the
+#                 continuum side is W = E e^2 / (1 - nu) per unit volume. Under an EQUIBIAXIAL
+#                 field every strut sees exactly the same axial strain e whatever its direction,
+#                 which is what collapses their Eq (6) to a closed form over the strut lengths
+#                 meeting at one node:
+#
+#                     Et At = 4 Et A w / ((1 - nu) sum_i L_i) = C Et d w,   A = d^2, nu = 1/3
+#
+#                 giving the paper's C = 0.621 (horizon 1.5d, 8 struts of length d and d*sqrt2)
+#                 and C = 0.102 (horizon 3.01d, 28 struts). `aydin_closed_form_C` reproduces both.
+#
+# The two routes DISAGREE — at matched nu the uniaxial route returns ~18% more EA at horizon 1.5 —
+# so which one is in force is a modelling decision, not an implementation detail. It is recorded on
+# the result as `field`, and the other route's area is always reported alongside for comparison.
 
 
 @dataclass
@@ -206,15 +229,21 @@ class EnergyBalanceResult:
     matching G under shear give different areas unless `nu == nu_consistent`.
     """
 
-    area: float             # A_t — the calibrated uniform strut area (from the eps_x balance)
+    area: float             # A_t — the calibrated uniform strut area (from the `field` balance)
     EA: float               # E * A_t
+    field: str              # which affine field set `area`: "uniaxial" (D47) or "equibiaxial" (D72)
     nu: float               # Poisson ratio used in the continuum energy (Eq 2.1)
-    area_x: float           # A_t from the eps_x balance
+    area_x: float           # A_t from the eps_x balance (transverse strain restrained)
     area_y: float           # A_t from the eps_y balance (equals area_x for an isotropic grid)
     area_shear: float       # A_t implied by matching G under pure shear instead
-    nu_consistent: float    # the nu at which the normal and shear balances agree
+    area_equibiaxial: float # A_t from the published equal-stress equibiaxial balance (2019 Appendix)
+    nu_consistent: float    # the nu at which the normal and shear balances agree — NOT the
+                            #   lattice's Poisson ratio; see `nu_effective` (D53)
     anisotropy: float       # |area_x - area_y| / area_x — grid directional bias
     isotropy_error: float   # |area_shear - area_x| / area_x at `nu` — cost of the pinned nu
+                            #   (always referenced to the UNIAXIAL route, whatever `field` is)
+    nu_effective: float     # the lattice's ACTUAL Poisson ratio, C12/C22 (D53)
+    cubic_anisotropy: float # C66 / ((C11-C12)/2); 1.0 = isotropic, else cubic-symmetric (D53)
     n_nodes: int
     n_struts: int
 
@@ -237,6 +266,7 @@ def energy_balance_area(
     nu: float,
     thickness: float,
     area_inplane: float,
+    field: str = "uniaxial",
     strain: float = 1e-3,
 ) -> EnergyBalanceResult:
     """Aydin's energy-balance calibration: the uniform strut area matching the elastic continuum.
@@ -249,17 +279,26 @@ def energy_balance_area(
     shear. The FIRST sets the returned `area`; the other two are diagnostics — `eps_y` measures the
     grid's directional bias, and the shear field reveals the lattice's own Poisson ratio.
 
+    `field` selects which affine field the balance is struck under — `"uniaxial"` (the D47 default:
+    eps_x with the transverse strain restrained) or `"equibiaxial"` (the published 2019 Appendix
+    route: equal stresses in both directions). Both areas are always reported; `field` only decides
+    which one lands in `area`/`EA`. They differ by ~18% at horizon 1.5, so the choice is a real one.
+
     `strain` is arbitrary (the balance is a ratio of two quadratic forms, so it cancels exactly);
     it is exposed only so a caller can confirm that.
     """
+    if field not in ("uniaxial", "equibiaxial"):
+        raise ValueError(f"field must be 'uniaxial' or 'equibiaxial', got {field!r}")
     e = float(strain)
     Fx = np.array([[e, 0.0], [0.0, 0.0]])
     Fy = np.array([[0.0, 0.0], [0.0, e]])
     Fs = np.array([[0.0, e / 2.0], [e / 2.0, 0.0]])   # pure shear, engineering gamma = e
+    Fb = np.array([[e, 0.0], [0.0, e]])               # equibiaxial — the 2019 route, and C12
 
     w_x = _affine_strut_energy(coords, pairs, Fx)
     w_y = _affine_strut_energy(coords, pairs, Fy)
     w_s = _affine_strut_energy(coords, pairs, Fs)
+    w_b = _affine_strut_energy(coords, pairs, Fb)
     if min(w_x, w_y, w_s) <= 0.0:
         raise ValueError("lattice stores no energy in one or more directions — the strut set is "
                          "degenerate (check mesh_size / horizon)")
@@ -269,24 +308,51 @@ def energy_balance_area(
     cont_normal = E * e * e * vol / (2.0 * (1.0 - nu * nu))
     # Pure shear: W = G*gamma^2/2 per unit volume, G = E / (2(1+nu)).
     cont_shear = (E / (2.0 * (1.0 + nu))) * e * e * vol / 2.0
+    # 2019 Appendix Eqs (3)-(4): equal stresses give eps_x = eps_y = e = sigma (1-nu)/E, so the
+    # stored energy density is eps*sigma = E e^2 / (1 - nu) — note NO factor of 1/2, because both
+    # directions contribute eps*sigma/2 and they are equal.
+    cont_equibiaxial = E * e * e * vol / (1.0 - nu)
 
     ea_x, ea_y = cont_normal / w_x, cont_normal / w_y
     ea_s = cont_shear / w_s
+    ea_b = cont_equibiaxial / w_b
+    ea = ea_x if field == "uniaxial" else ea_b
 
     # The normal and shear balances agree only at one nu. Setting them equal and cancelling the
     # common (1+nu) factor leaves a closed form:  nu = 1 - 2 * W_shear / W_normal.
     nu_consistent = 1.0 - 2.0 * w_s / w_x
 
+    # The lattice's OWN plane stiffness tensor, read off the same affine energies (D53). With
+    # W = 1/2 * eps^T C eps and unit strain e: w_x = C11 e^2/2, w_y = C22 e^2/2, w_s = C66 e^2/2 and
+    # w_b = (C11 + 2 C12 + C22) e^2/2, so C12 follows from the biaxial field. Every quantity below is
+    # a RATIO of energies, so the common e^2/2 scale and the EA = 1 normalization both cancel.
+    #
+    # These two are reported because `nu_consistent` is routinely misread as the lattice's Poisson
+    # ratio, and it is not: for the horizon = 1.5 grid `nu_consistent` is ~0.18 while the lattice's
+    # actual Poisson ratio is ~0.41. Both numbers are correct and they answer different questions —
+    # the first is "at what nu do the normal and shear CALIBRATION ROUTES agree", the second is
+    # "what lateral strain does this lattice actually produce". They coincide only for an isotropic
+    # lattice, and a uniform-EA horizon lattice is cubic-symmetric, not isotropic
+    # (`cubic_anisotropy` ~ 1.38), so no single nu makes it isotropic at all.
+    c11, c22, c66 = 2.0 * w_x, 2.0 * w_y, 2.0 * w_s
+    c12 = w_b - w_x - w_y            # from c11 + 2*c12 + c22 = 2*w_b
+    nu_effective = c12 / c22
+    cubic_anisotropy = c66 / (0.5 * (c11 - c12))
+
     return EnergyBalanceResult(
-        area=ea_x / E,
-        EA=ea_x,
+        area=ea / E,
+        EA=ea,
+        field=str(field),
         nu=float(nu),
         area_x=ea_x / E,
         area_y=ea_y / E,
         area_shear=ea_s / E,
+        area_equibiaxial=ea_b / E,
         nu_consistent=float(nu_consistent),
         anisotropy=abs(ea_x - ea_y) / ea_x,
         isotropy_error=abs(ea_s - ea_x) / ea_x,
+        nu_effective=float(nu_effective),
+        cubic_anisotropy=float(cubic_anisotropy),
         n_nodes=len(coords),
         n_struts=len(pairs),
     )
@@ -301,6 +367,7 @@ def energy_balance_rectangle(
     nu: float,
     thickness: float,
     horizon: float = 1.5,
+    field: str = "uniaxial",
     strain: float = 1e-3,
 ) -> EnergyBalanceResult:
     """`energy_balance_area` on a freshly-meshed rectangular patch of the same grid and horizon.
@@ -313,4 +380,29 @@ def energy_balance_rectangle(
     coords = mesh_rectangle_nodes(length, height, mesh_size)
     pairs = connect_horizon(coords, mesh_size, horizon)
     return energy_balance_area(coords, pairs, E=E, nu=nu, thickness=thickness,
-                               area_inplane=length * height, strain=strain)
+                               area_inplane=length * height, field=field, strain=strain)
+
+
+def aydin_closed_form_C(horizon: float = 1.5, nu: float = 1.0 / 3.0) -> float:
+    """The published closed-form coefficient in `Et*At = C*Et*d*w` (2019 Appendix, Eq 6).
+
+    The interior-node form of the `field="equibiaxial"` balance: under an equibiaxial field every
+    strut at a node carries the same strain, so the balance collapses to a sum over the lengths of
+    the struts meeting there, with each counted at half (they are shared with the far node) and a
+    tributary area `A = d^2`:
+
+        C = 4 d^2 / ((1 - nu) * sum_i L_i)      [L_i in units of d]
+
+    Reproduces the paper's 0.621 (horizon 1.5d) and 0.102 (horizon 3.01d) at their nu = 1/3.
+
+    This is the BOUNDARY-FREE value. `energy_balance_rectangle(..., field="equibiaxial")` runs the
+    same balance over an actual finite patch, where nodes near the edge have fewer struts, and so
+    returns a slightly different (softer-lattice, hence larger-area) number — for a 40x40 patch at
+    horizon 1.5 the two differ by ~1%.
+    """
+    # Struts from one interior node of a unit square grid out to `horizon`, by offset (i, j).
+    reach = int(np.floor(horizon)) + 1
+    lengths = [np.hypot(i, j)
+               for i in range(-reach, reach + 1) for j in range(-reach, reach + 1)
+               if (i, j) != (0, 0) and np.hypot(i, j) <= horizon + 1e-12]
+    return float(4.0 / ((1.0 - nu) * sum(lengths)))

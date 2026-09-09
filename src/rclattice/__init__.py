@@ -12,8 +12,20 @@ from .builders import (
     build_lattice_rc,
     select_nodes,
 )
-from .calibration import CalibrationTargets, calibrate_lattice, continuum_targets
+from .calibration import (
+    CalibrationTargets,
+    EnergyBalanceResult,
+    aydin_closed_form_C,
+    calibrate_lattice,
+    continuum_targets,
+    energy_balance_area,
+    energy_balance_rectangle,
+)
 from .materials import (
+    aydin_lattice_softening,
+    bond_elastic_brittle,
+    bond_elastic_brittle_damaging,
+    concrete_lattice_aydin,
     concrete_nd_elastic,
     concrete_nd_nonlinear,
     concrete_uniaxial_elastic,
@@ -60,14 +72,22 @@ __all__ = [
     "calibrate_lattice",
     "continuum_targets",
     "CalibrationTargets",
+    "energy_balance_area",
+    "energy_balance_rectangle",
+    "EnergyBalanceResult",
+    "aydin_closed_form_C",
     # material mappings (grade -> OpenSees material)
     "concrete_uniaxial_elastic",
     "concrete_uniaxial_nonlinear",
     "concrete_uniaxial_regularized",
+    "concrete_lattice_aydin",
+    "aydin_lattice_softening",
     "concrete_nd_elastic",
     "concrete_nd_nonlinear",
     "steel_uniaxial",
     "steel_uniaxial_elastic",
+    "bond_elastic_brittle",
+    "bond_elastic_brittle_damaging",
     # FE model objects
     "Model",
     "Node",

@@ -1,0 +1,344 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{rclattice-report}
+
+\graphicspath{{../output/vk3_wall/}{../output/vk3_wall/runs/2026-08-26_142103_cyclic_dynamic_gf2_0.95pct/}{reports/vk3_wall/figures/}}
+
+\title{\vspace{-14mm}\textbf{VK3 --- Wall-Type Bridge Pier}\\[2mm]
+\large Lattice Model, Dynamic Analysis Parameters and Results\\[1mm]
+\normalsize Reversed-cyclic analysis to 0.94\% drift; why every solver setting is what it is}
+\author{\normalsize \texttt{rclattice} --- \texttt{examples/vk3\_wall/}}
+\date{\normalsize \today}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\section*{Specimen}
+
+Test Unit VK3 of Bimschas, M. (2010), \emph{Displacement Based Seismic Assessment of Existing
+Bridges in Regions of Moderate Seismicity}, IBK Bericht Nr.~326, Institut für Baustatik und
+Konstruktion, ETH Zürich; vdf Hochschulverlag, \texttt{doi:10.3929/ethz-a-006237119}, Chapter~5.
+A 1:2 scale squat wall-type bridge pier, tested quasi-statically under reversed cyclic lateral
+displacement with constant axial load.
+
+VK3 is the first \emph{shear-relevant} specimen in this repository. Its shear-span ratio is
+essentially that of WSH3 (2.20 against 2.28) but it carries three times less transverse steel, its
+shear deformation reaches 20--22\% of the top displacement, and the test ended in a combined shear
+and axial-load failure at 1.59\% drift. That makes it the case where a lattice's explicit diagonal
+representation should matter --- and, as \S\ref{sec:limit} reports, where its lack of aggregate
+interlock also becomes decisive.
+
+Unit system throughout: \textbf{N, mm, MPa, s}.
+
+\section{Model parameters and why each was chosen}
+
+\subsection{Geometry and reinforcement --- taken, not derived}
+
+Every geometric quantity is used unchanged from the source. Uniquely among the three wall studies
+in this repository, \textbf{no geometric rounding is needed}: 1500, 3300, 3700, 3000 and 900\unit{mm}
+are all whole numbers of 50\unit{mm} cells, so the shear span is exact and drift needs no correction.
+
+\begin{tabularx}{\textwidth}{@{}p{52mm}p{34mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Quantity} & \textbf{Value} & \textbf{Source / reason} \\
+\midrule
+Section depth $l_w$        & 1500\unit{mm} & Tab.~5.1 \\
+Section width $b_w$        & 350\unit{mm}  & Tab.~5.1 \\
+Shear span $L_v$           & 3300\unit{mm} & Tab.~5.1; $L_v/l_w = 2.20$ \\
+Pier height                & 3700\unit{mm} & Fig.~5.1; 400\unit{mm} continues above the actuator \\
+Foundation                 & $3000\times900$\unit{mm} & Fig.~5.1 \\
+Longitudinal steel         & 42\,\O{}14, $\rho_{sl}=1.232\%$ & Fig.~5.2 right; chapter states 1.23\% \\
+Transverse steel           & 2\,\O{}6@200, $\rho_{sw}=0.081\%$ & Tab.~5.3; chapter states 0.08\% \\
+Axial load $N_{top}$       & 1300\unit{kN} & Tab.~5.7 \\
+\bottomrule
+\end{tabularx}
+
+\medskip
+The reading of Fig.~5.2 was verified \emph{before} modelling by reproducing three ratios the chapter
+prints independently ($\rho_{sl}$, $\rho_{sw}$ and the axial-load ratio, each to under 1\%). The
+four end bars at each section end are stacked through the 284\unit{mm} thickness and therefore
+collapse onto a single in-plane position, giving 19 bar lines: 17 web lines of 307.9\unit{mm$^2$}
+and 2 end lines of 615.8\unit{mm$^2$}.
+
+\subsection{Materials --- three conventions, flagged as such}
+
+The chapter gives $f_c'=34$\unit{MPa} and \emph{nothing else} about the concrete: no $E_c$, no
+$f_t$, and --- unlike the WSH3 paper, whose cracking moment pinned it --- \textbf{no $M_{cr}$ to
+pin $f_t$ against}. Three inputs are therefore conventions:
+
+\begin{tabularx}{\textwidth}{@{}p{34mm}p{30mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Quantity} & \textbf{Value} & \textbf{Basis, and why this one} \\
+\midrule
+$E_c$      & 32\,396\unit{MPa} & SIA~262, $10000\,f_{cm}^{1/3}$. The specimen is Swiss and the chapter's frame of reference is SIA~262 throughout; EC2/MC90 agrees within 2\%, ACI is 15\% lower and was rejected as the wrong code frame. \\
+$f_t$      & 2.633\unit{MPa}   & EC2 $0.30 f_{ck}^{2/3}$ at $f_{ck}=f_{cm}-8$. Nothing in the chapter constrains it; this is consistency with the WSH3 study, not evidence. \\
+$G_f$      & 0.0707\unit{N/mm} & MC90 on the mean strength, \textbf{16\unit{mm} aggregate assumed}. The chapter never states aggregate size, and MC90's $G_{f0}$ ranges 0.025--0.058 across 8--32\unit{mm} --- a factor of 2.3. See \S\ref{sec:gf}. \\
+$\varepsilon_{c0}$ & 0.00210 & Derived as $2f_c/E_c$, because Concrete02's initial compressive tangent is $2f_c/\varepsilon_{c0}$ whatever $E$ says. Quoting a tabulated value instead would silently mismatch the calibrated modulus. \\
+\bottomrule
+\end{tabularx}
+
+\medskip
+Steel is \texttt{Steel02} (Giuffré--Menegotto--Pinto). Both grades take $f_y$ directly from Tab.~5.4;
+the hardening ratio is \textbf{measured, not assumed}, as
+$b=(f_u-f_y)/(E_s(\varepsilon_{su}-f_y/E_s))$:
+
+\begin{center}\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& $f_y$ & $E_0$ & $b$ & post-yield modulus & $R_0,c_{R1},c_{R2}$ \\
+\midrule
+\O{}14 longitudinal & 515\unit{MPa} & 200\,000 & 0.00466 & 932\unit{MPa} $=E/215$ & 18, 0.925, 0.15 \\
+\O{}6 hoops         & 518\unit{MPa} & 200\,000 & 0.01001 & 2002\unit{MPa} $=E/100$ & 18, 0.925, 0.15 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+$b$ is low because the real steel has a pronounced yield plateau to $\varepsilon_s\approx0.025$
+(Sec.~5.2.3a) which Steel02's smooth curve cannot represent; the measured fit smears plateau and
+hardening into one slope. $R_0$, $c_{R1}$, $c_{R2}$ are OpenSees defaults --- they shape only the
+elastic--plastic corner and have no measured counterpart.
+
+\subsection{Discretization and calibration}
+
+\begin{tabularx}{\textwidth}{@{}p{40mm}p{30mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Why} \\
+\midrule
+Mesh size          & 50\unit{mm}  & The coarsest grid that keeps all 19 in-plane bar positions distinct (100\unit{mm} collapses four). It also sits at Ba\v{z}ant's natural crack-band width, $\approx 3d_{max}=48$\unit{mm}. \\
+Horizon            & 1.5          & Gives 7.7 struts per node. \textbf{Best of the whole range on shear stiffness} (2.67\% error; 2.9 gives 7.66\%, the often-recommended 3.01 gives 25.2\%). Larger horizons also lengthen struts, and crack-band regularization makes longer struts \emph{more} brittle. \\
+Strut area $A_t$   & 10\,594.5\unit{mm$^2$} & Aydin (2017) energy balance --- a closed-form homogenization, no reference model and no FE solve. \\
+Model size         & 3453 nodes   & 13\,354 concrete struts $+$ 2411 rebar struts. \\
+Lattice elasticity & $\nu_{\text{eff}}=0.406$ & Cubic anisotropy 1.40. $\nu_{\text{consistent}}=0.178$ is \emph{not} a Poisson ratio, only where the two calibration routes agree. \\
+\bottomrule
+\end{tabularx}
+
+\section{Dynamic analysis parameters}\label{sec:dyn}
+
+This is the section the study turned on. Every setting below is stated with the reason it holds
+that value, because one of them --- the integrator --- cost a full day of misdiagnosis when it was
+allowed to differ silently between two runners.
+
+\subsection{Why the analysis is dynamic at all}
+
+A static displacement-controlled path-follower \textbf{stalls at 0.151\% drift} on this pier. That is
+not a convergence failure to be tuned away: 15 of 19 OpenSees algorithms stall at the same point in
+the companion \texttt{compression\_cube} study, which is the signature of a genuinely singular
+tangent rather than a solver problem. The response is therefore imposed as a transient solve, where
+mass and damping regularize the singularity (dynamic relaxation).
+
+\subsection{Time integration --- the decisive parameter}
+
+\begin{tabularx}{\textwidth}{@{}p{40mm}p{34mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Why} \\
+\midrule
+Integrator & \textbf{HHT}, $\alpha=0.7$ & Equivalent to $\gamma=1.5-\alpha=0.80$, $\beta=(2-\alpha)^2/4=0.4225$. $\gamma>0.5$ is what produces \emph{algorithmic} damping, and HHT's is frequency-selective: it annihilates high-frequency response while leaving the structural response untouched. \\
+\emph{Not} Newmark & $(0.5,0.25)$ & Average-acceleration has $\gamma=0.5$ and therefore \textbf{exactly zero} numerical damping; it conserves energy and sustains a spurious high-frequency mode indefinitely. See \S\ref{sec:integ}. \\
+Time step $\Delta t$ & $T_1/30 = 0.605$\unit{ms} & $T_1=18.15$\unit{ms} from an eigen solve on the assembled model. \\
+\bottomrule
+\end{tabularx}
+
+\medskip
+\textbf{An honest statement about what is and is not resolved.} $\Delta t$ gives 30 steps per
+fundamental period, which is ample for the structural response. It gives \textbf{0.18 steps per
+period} for the local strut modes, which sit at $\omega_s/\omega_1\approx165$ because VK3's struts
+are the stiffest of the three walls ($EA/L=6.86\times10^6$\unit{N/mm}, driven by the 350\unit{mm}
+thickness) against a 2.1$\times10^{-3}$\unit{t} nodal mass. Those modes are \emph{not computed};
+they are suppressed by algorithmic damping. The analysis is stable because of that suppression, and
+the high-frequency content of these results should not be read as physical.
+
+\subsection{Damping}
+
+Both dynamic runners use identical Rayleigh damping:
+\[
+\texttt{rayleigh}(\alpha_M,\;\beta_K,\;\beta_{K\text{init}},\;\beta_{K\text{comm}})
+= (\zeta\omega_1,\; 0,\; \zeta/\omega_1,\; 0)
+= (69.24,\; 0,\; 5.777\times10^{-4},\; 0)
+\]
+with $\zeta=0.2$ and $\omega_1=346.2$\unit{rad/s}.
+
+\begin{itemize}\itemsep2pt
+\item \textbf{$\zeta=0.2$} is the measured optimum from the SW-NC-FF study, where crack-release
+ringing --- not drive rate --- was shown to control the contamination. It is also physically
+defensible as 10--20\% equivalent viscous damping for heavily cracked RC.
+\item \textbf{$\beta_K=0$, damping on the \emph{initial} stiffness.} A tangent-proportional term
+rides a matrix that collapses when struts crack, so the damping force explodes and diverges the
+solve. $\beta_{K\text{init}}$ gives the same damping from a matrix that never collapses.
+\item \textbf{The frequency dependence is severe and worth stating.}
+$\zeta_{\text{eff}}(\omega)=\tfrac{\zeta}{2}(\omega_1/\omega+\omega/\omega_1)$ gives 20\% at the
+fundamental, 101\% at $10\omega_1$, and \textbf{1652\% at the stiffest strut mode}. Even that was
+insufficient under Newmark --- Rayleigh damps the \emph{response} while an energy-conserving
+integrator re-injects energy at every stiffness change.
+\end{itemize}
+
+\subsection{Drive}
+
+\begin{tabularx}{\textwidth}{@{}p{40mm}p{34mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Why} \\
+\midrule
+Rate & 7.6\unit{mm/s} & \textbf{The chapter states no actuator rate anywhere.} Held at the same absolute speed as the other two wall studies so the three remain comparable. The licence is the \emph{measured residual}, not the number. \\
+Protocol & 60 measured turning points & Recovered from the digitized Fig.~5.13 loops rather than idealized --- including the 13 small intermediate cycles the chapter never tabulates for VK3, and the true elastic amplitudes (0.85/2.10/5.08\unit{mm}), which the measured $k_0$ mispredicts by up to $3\times$. \\
+Residual check & \texttt{quasi\_static=True} & Reports the inertia $+$ damping the drive and base reactions fail to balance. Compare \emph{within} a solver only: HHT inflates it $\sim60\times$ against Newmark without biasing the shear. \\
+\bottomrule
+\end{tabularx}
+
+\medskip
+\textbf{A known deficiency.} A constant rate makes small amplitudes relatively fast. The runner's own
+quasi-static intent is 48 fundamental periods to each peak; at 7.6\unit{mm/s} that holds above
+$\approx$6.6\unit{mm} but gives only \textbf{5.7 periods} at the 0.86\unit{mm} elastic level ---
+$8\times$ too fast. The entire elastic block (16 of 60 reversals) is affected. This does not change
+the collapse, which is a static-strain phenomenon, but it inflates loop area, which scales linearly
+with rate.
+
+\subsection{Solution algorithm and convergence}
+
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+System / numberer / constraints & \texttt{BandGeneral} / \texttt{RCM} / \texttt{Transformation} \\
+Convergence test & \texttt{NormDispIncr}, tol $10^{-5}$, \texttt{max\_iter} 50 \\
+Primary algorithm & \texttt{Newton} \\
+Fallbacks & \texttt{KrylovNewton}, then \texttt{NewtonLineSearch}, each at $\Delta t/10$ \\
+Gravity stage & \texttt{LoadControl}, 10 steps, held constant into the transient \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The tolerance was checked and is \emph{not} the binding constraint: in the diverging Newmark run the
+median failed step ended \textbf{3170$\times$} the tolerance and the worst at $10^{11}\times$. Those
+iterations diverge outright; they do not creep toward a threshold, so raising \texttt{max\_iter} or
+relaxing \texttt{tol} would change nothing.
+
+\section{The integrator finding}\label{sec:integ}
+
+Changing \emph{nothing} but the integrator, on the same model, mesh, materials, damping and
+$\Delta t$:
+
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+& \textbf{Newmark(0.5,\,0.25)} & \textbf{HHT(0.7)} \\
+\midrule
+Base shear at 0.310\% drift & 0.1\unit{kN} (collapse) & \textbf{727.1\unit{kN}} \\
+Reported peak               & 967.9\unit{kN} --- $1.14\times$ the section capacity & 730.6\unit{kN} \\
+Convergence failures        & 6568 & \textbf{30} \\
+Runtime, 0.6\% screen       & 6.3\unit{h} (at $\Delta t/4$) & \textbf{8\unit{min}} \\
+Behaviour past peak         & $\pm$600\unit{kN} chaos & smooth degradation \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{run\_cyclic\_dynamic} had always used HHT; \texttt{run\_pushover\_dynamic} defaulted to
+Newmark. Seven diagnostics --- horizon, damping, compressive law, $R_0$, hardening $b$, $\Delta t$ ---
+were run on the pushover runner and all eliminated against an integrator that was itself generating
+the failure. \textbf{Screen with the integrator the deliverable actually uses.} Both runners now
+report \texttt{out["integrator"]} so this cannot recur silently.
+
+\section{Results}
+
+\subsection{Elastic verification}
+
+\begin{center}\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Lattice secant stiffness            & 210.8\unit{kN/mm} & \\
+Transformed-section cantilever      & 246.6\unit{kN/mm} & $K_{lat}/K_{tr}=\mathbf{0.855}$ \\
+Measured initial stiffness          & 173.7\unit{kN/mm} & $K_{lat}/K_{meas}=1.213$ \\
+Shear share of elastic flexibility  & 13.8\% & test measured 20--22\% of \emph{displacement} once cracked \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The measured 173.7\unit{kN/mm} comes from the digitized first elastic level ($\pm$0.86\unit{mm} at
+$\approx$151\unit{kN}), below the pier's own cracking shear, and is a target the chapter never
+prints. The chapter's $k_0=60$\unit{kN/mm} is a \emph{secant to first yield} on an already cracked
+pier --- 0.24$\times$ the uncracked value --- and is not a valid elastic target.
+
+The foundation's out-of-plane thickness is assumed (1000\unit{mm}); a sensitivity across
+700--1200\unit{mm} moves $K_{lat}$ by only $\pm3.5\%$, so it explains neither the 0.855 nor the
+1.213 ratio.
+
+\subsection{Monotonic pushover, HHT}
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Configuration & Reliable peak & at drift & Collapse & vs test (891\unit{kN}) \\
+\midrule
+$G_f\times2$, \texttt{Truss}      & 730.4\unit{kN} & 0.313\% & 0.315\% & 0.82 \\
+$G_f\times2$, \texttt{corotTruss} & 723.0\unit{kN} & 0.311\% & 0.313\% & 0.81 \\
+$G_f\times4$, \texttt{Truss}      & 862.4\unit{kN} & 0.417\% & 0.422\% & 0.97 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Peaks are the \emph{reliable} values from a spike- and collapse-aware summary, not
+$\max|\text{shear}|$; the raw maxima are post-collapse spikes (the \texttt{corotTruss} run's raw
+maximum is 774.3\unit{kN}, one sample out of 424 whose neighbourhood median is 24.9\unit{kN}).
+
+\subsection{Reversed cyclic, $G_f\times2$, to 0.94\% drift}
+
+\begin{center}\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+Steps / runtime            & 203\,631 / 5.83\unit{h}, \texttt{converged=True} \\
+Convergence failures       & 317 (0.16\%) \\
+Drift reached              & $\pm$0.943\% \\
+Reliable peak              & 652.1\unit{kN} at 0.245\% drift ($0.73\times$ test) \\
+Residual (inertia+damping) & 109\% of peak, trend $0.69\times$ (steady) \\
+Damage at the end          & 1668/13\,354 struts cracked (12.5\%), 0 past $\varepsilon_{c0}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Limitations and what the model cannot do}\label{sec:limit}
+
+\textbf{The pier collapses at 0.31\% drift; the test peaked at 0.89\% and failed at 1.59\%.} At
+0.290\% drift --- one step before --- only \textbf{9.6\%} of struts are cracked, 0.9\% have lost all
+tensile stiffness and \emph{one} is crushing. A structure that intact has no kinematic mechanism, so
+the failure is not progressive material damage. It is a shear band forming with nothing to resist
+sliding across it: a shared-node axial-truss lattice has no aggregate-interlock or dowel element.
+That limitation was identified before any run and is the one that governs.
+
+Also absent by construction: bar buckling and fracture (\texttt{Steel02} has neither, and both
+occurred in the test from 0.95\% drift); cover spalling; the out-of-plane hoop legs; and the hoops'
+90$^\circ$ hooks, which in the test \emph{could open} after spalling --- so the model's transverse
+steel works indefinitely where the real pier's did not.
+
+\subsection{On $G_f\times2$ and $\times4$}\label{sec:gf}
+
+$G_f$ enters through crack-band regularization: a strut softens to zero stress over a crack opening
+$w_c=2G_f/f_t$, giving 0.107\unit{mm} at $\times2$ and 0.215\unit{mm} at $\times4$.
+
+\textbf{$\times2$ needs no tension-stiffening argument at all.} MC90's $G_{f0}$ for 32\unit{mm}
+aggregate is 0.058 against 0.030 for the 16\unit{mm} assumed here --- a factor of 1.93. Since the
+chapter never states aggregate size, $\times2$ sits inside the uncertainty of the input.
+
+\textbf{$\times4$ does need one, and it changes the result.} It raises the peak by 18\% and takes it
+past the zero-tension section capacity of 848\unit{kN}, meaning concrete tension now contributes to
+flexural strength. It should be reported as a sensitivity study, not adopted silently.
+
+\subsection{Known defects in the present model}
+
+\begin{itemize}\itemsep2pt
+\item \textbf{Self-weight is not applied as a gravity load.} The lumped mass gives 68.0\unit{kN} ---
+almost exactly the chapter's 70\unit{kN} --- but gravity uses only the 1300\unit{kN} actuator force,
+so $N_{base}$ is 5.1\% low. It does not affect the collapse (the extreme-fibre strain at first yield
+is 0.269\% either way) but should be corrected.
+\item \textbf{Small-amplitude cycles are driven $3$--$8\times$ too fast} (\S\ref{sec:dyn}), inflating
+loop area, which scales linearly with rate.
+\item \textbf{Perfect bond} throughout; bond-slip interface springs are the physically correct
+mechanism that tension stiffening is a proxy for.
+\end{itemize}
+
+\subsection{What the model does do well}
+
+The model was audited for topology (all 3453 nodes connected, 19 continuous bar columns, hoops at
+the correct levels), load path, and modal behaviour (mode 1 is a clean flexural cantilever). Its
+section capacity reproduces the chapter's own nominal moment to \textbf{0.4\%} (2798 against
+2808\unit{kN\,m}), and every geometry and reinforcement quantity to under 1\%. The pre-collapse
+response is smooth, reproducible across six configurations, and $\approx1.2\times$ stiffer than the
+test throughout --- the expected perfect-bond bias.
+
+\end{document}

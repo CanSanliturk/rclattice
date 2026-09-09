@@ -27,7 +27,16 @@ PAPER = {
     "fc": (39.2, "Table 3"), "Ec": (35.2, "Table 3"),
     "s_tie": (75.0, "Table 1"), "s_Dnom": (6.25, "Table 1"),
     "V_max": (454.0, "Table 5"), "drift_u": (2.03, "Table 4"), "mu": (5.7, "Table 4"),
+    "M_cr": (527.0, "Table 5"),
 }
+
+# The paper never prints a tensile strength, but Table 5's cracking moment pins the one it used:
+# M_cr = (f_ctm + N/A_g)*t*l_w^2/6 with N/A_g = 2.287 MPa needs f_ctm = 2.97 MPa. That is EC2's
+# 0.30*f_ck^(2/3) at the CHARACTERISTIC strength f_ck = f'_c - 8 = 31.2, not at the mean f'_c = 39.2,
+# and the same reading reproduces WSH1/WSH5/WSH6's M_cr to 1%. `specimen.FT` now uses it (D66); this
+# row is the independent check that it still does, since everything the lattice does before yield is
+# governed by when its struts crack.
+FT_IMPLIED = 2.97
 
 
 def _row(label, paper, model, unit="", src="", tol=1.0):
@@ -53,11 +62,13 @@ def report(mesh_size: float = sp.MESH) -> str:
     rho_web = a_web / ((sp.LW - 2 * bound_len) * sp.TW) * 100
 
     cal = build.calibrate(mesh_size=mesh_size)
-    model = build.wall_lattice(cal.area, mesh_size=mesh_size, nonlinear=False)
+    model = build.wall_lattice(cal.area, mesh_size=mesh_size)
     struts = sum(1 for e in model.elements if e.kind not in ("longitudinal", "stirrup"))
     k_g, share = build.cantilever_stiffness(shear_span=sp.L_V, inertia=build.gross_inertia())
     k_t, _ = build.cantilever_stiffness(shear_span=sp.L_V,
                                         inertia=build.transformed_inertia(mesh_size))
+    # uncracked cracking moment the model's own f_t implies, for the row below
+    m_cr = (sp.FT + sp.UNIT["N"] / (sp.LW * sp.TW)) * sp.TW * sp.LW ** 2 / 6.0
     true_c = sum(abs(x) for x in sp.BOUNDARY_X[:3]) / 3.0
     snap_c = sum(abs(sp.snap(x, mesh_size)) for x in sp.BOUNDARY_X[:3]) / 3.0
 
@@ -91,6 +102,8 @@ def report(mesh_size: float = sp.MESH) -> str:
          _row("axial load N", PAPER["N"][0], sp.UNIT["N"] / 1e3, "kN", PAPER["N"][1]),
          _row("N / (A_g f'c)", PAPER["N_ratio"][0],
               sp.UNIT["N"] / (sp.LW * sp.TW * sp.FC), "", PAPER["N_ratio"][1], tol=3.0),
+         _row("f_t", FT_IMPLIED, sp.FT, "MPa", "back-figured from Table 5 M_cr", tol=5.0),
+         _row("M_cr", PAPER["M_cr"][0], m_cr / 1e6, "kN·m", PAPER["M_cr"][1], tol=5.0),
          "",
          "Steel (Table 2), hardening b measured as (R_m − R_p02)/(E_s(A_gt − R_p02/E_s)):", "",
          "| Bar | f_y = R_p02 | R_m | A_gt | b |", "|---|---|---|---|---|",
@@ -109,7 +122,11 @@ def report(mesh_size: float = sp.MESH) -> str:
          f"- mesh {mesh_size:g} mm, horizon {sp.HORIZON} → **{len(model.nodes)} nodes, {struts} concrete struts, "
          f"{len(model.elements) - struts} bar struts**",
          f"- Aydin energy-balance strut area **A_t = {cal.area:,.1f} mm²** = "
-         f"{cal.area / (sp.TW * mesh_size):.4f}·(t·mesh); lattice Poisson ratio {cal.nu_consistent:.3f}",
+         f"{cal.area / (sp.TW * mesh_size):.4f}·(t·mesh)",
+         f"- lattice elasticity: `nu_consistent` = {cal.nu_consistent:.3f} (the nu at which the "
+         f"normal-strain and shear routes agree — **not** a Poisson ratio), actual "
+         f"`nu_effective` = {cal.nu_effective:.3f}, cubic anisotropy "
+         f"{cal.cubic_anisotropy:.2f} (1.0 would be isotropic; D53)",
          f"- boundary-group centroid snapped {true_c:.1f} → {snap_c:.1f} mm "
          f"(**{abs(snap_c - true_c) / true_c * 100:.2f}%** on the flexural lever arm)",
          f"- geometric rounding: wall height {PAPER['H_wall'][0]:.0f}→{sp.H_WALL_MODEL:.0f} mm, "
@@ -124,6 +141,14 @@ def report(mesh_size: float = sp.MESH) -> str:
          "- **Bar buckling and bar fracture**, which ended the real test (D12 corner bar ruptured at",
          "  1.79% drift after buckling). Steel02 has neither, so the model cannot reproduce the failure",
          "  mode — only the response up to it.",
+         "- **The second concrete cast.** Each unit was cast in two phases and Table 3 reports only the",
+         "  FIRST (foundation + wall to 1.5 m); the concrete above 1.5 m is never characterised. The",
+         "  model applies the phase-1 grade to the whole wall. The plastic zone is 1700 mm, so the",
+         "  region that matters is phase-1 concrete; above it the wall stays essentially elastic.",
+         "- **Strain penetration into the foundation.** The bars are anchored 450 mm into an ELASTIC",
+         "  foundation with perfect bond, so the model cannot produce the fixed-end rotation the test",
+         "  measured separately (paper Fig. 9a). Total displacement will therefore be short by that",
+         "  component, which is why the base CURVATURE (Fig. 15d) is the fairer local comparison.",
          ""]
     return "\n".join(L)
 

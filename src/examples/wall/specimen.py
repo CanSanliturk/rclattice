@@ -279,6 +279,43 @@ def protocol(max_drift: float | None = None) -> tuple[tuple[float, ...], tuple[i
     return (tuple(PROTOCOL_PEAKS[i] for i in keep), tuple(PROTOCOL_CYCLES[i] for i in keep))
 
 
+# --- how the protocol is DRIVEN (dynamic relaxation) --------------------------------------------
+# The nonlinear runs impose the protocol as a transient solve (D49), so two numbers decide whether
+# what comes out is the wall's response or the solver's. Both are recorded here rather than as
+# per-script argparse defaults, because pushover and cyclic must share them to stay comparable.
+# Both were MEASURED, not assumed: `--quasi-static` reports the inertia + damping the drive and base
+# reactions fail to balance, and the pair below minimises it per unit of run time (D62).
+#
+# DRIVE RATE, mm/s at the actuator level. The recorded base shear is a sum of reactions, so it
+# carries the inertia and damping of everything above the base. Set it as a SPEED, never through
+# `periods_to_peak` — a period count scales with the protocol amplitude, so the same setting drives
+# the 4% protocol four times faster than the 1% one (at T1 = 24 ms it reaches 20-79 mm/s, an order
+# of magnitude above anything verified).
+#
+# 7.6 is the PUBLISHED value: it is what the committed 4% run used, it was checked against the
+# static solver to 1%, and at the damping below it also measures best of everything tried — 4.0% of
+# peak shear against 4.6% at 2.0 mm/s (D64). Slowing the drive was expected to help and does not,
+# because the contamination is crack-release ringing rather than drag, and DAMPING is what controls
+# that; at zeta = 0.2 the residual over rates 7.6 / 3.8 / 2.0 reads 4.0 / 12.5 / 4.6%, which is
+# scatter between discrete cracking events, not a trend. What rate does control cleanly is the
+# start-up and reversal transient (22.0 / 10.5 / 5.3 kN), so a study of LOOP SHAPE near the
+# reversals — not peak strength — is the reason to lower it. Cost is proportional: the 4% protocol
+# is ~464k steps (~7 h) here against ~1.76M (~27 h) at 2.0.
+QUASI_STATIC_RATE = 7.6
+#
+# DAMPING RATIO. 0.8 (near-critical) is what dynamic relaxation is usually run at, and it is not a
+# number a report can defend. 0.2 is: 10-20% equivalent viscous damping is what a heavily cracked RC
+# wall actually exhibits near its capacity, which is the state this specimen spends the protocol in.
+#
+# It is also the knob that actually matters, and the reason is worth keeping. The contamination here
+# is NOT the steady viscous drag C.v — that is only ~2.5 kN by hand at 0.8 — it is the ringing
+# released every time a strut cracks. At the published 7.6 mm/s the residual reads 10.3% of peak
+# shear at zeta = 0.8, 12.4% at 0.05, and 4.0% at 0.2: near-critical damping is not the safe choice
+# it looks like, and 0.05 leaves each crack ringing for ~20 periods. 0.2 more than halves the
+# contamination the committed runs carried, at no cost in run time (D62/D64).
+DAMPING_RATIO = 0.2
+
+
 def lateral_loads(model) -> list[Load]:
     """Reference lateral pattern: a horizontal line load at the actuator level, y = 2200 mm."""
     ids = select_nodes(model, (-LW, LW, A_SHEAR - EPS, A_SHEAR + EPS))
@@ -293,3 +330,70 @@ def control_node(model) -> int:
 def base_nodes(model) -> list[int]:
     """The supported pedestal soffit — where base shear is summed."""
     return select_nodes(model, (-PED_L, PED_L, -PED_H - EPS, -PED_H + EPS))
+
+
+# --- vertical strain gauge over the wall base (D63) ---------------------------------------------
+# The base region is where a flexure-controlled wall does its work, so the measurement that
+# characterises it is the VERTICAL strain profile across the section: one row of points on the
+# wall-pedestal face and a second GAUGE_H above it, differenced over the gauge length. That is
+# exactly the instrument the test uses — a line of vertical LVDTs on the wall face (paper Fig. 21
+# derives its flexure/shear/rocking split from them) — so the model quantity and the measured one
+# are the same construction, not merely analogous.
+#
+# GAUGE_H must be a whole number of mesh spacings so both rows land on nodes; 250 = 5 x 50 mm.
+GAUGE_H = 250.0
+
+
+def gauge_nodes(model, *, gauge: float = GAUGE_H) -> tuple[list[float], list[int], list[int]]:
+    """Aligned node columns spanning the base gauge: `(xs, bottom_ids, top_ids)`.
+
+    `bottom_ids[i]` and `top_ids[i]` share an x of `xs[i]`, so differencing their vertical
+    displacements gives the average axial strain of that column over `gauge`.
+
+    Restricted to the WALL width: the y = 0 row is shared with the pedestal, which is 1900 mm long
+    against the wall's 1000, so an unrestricted box would pick up 19 pedestal nodes that have no
+    partner above and do not belong to the section being measured.
+    """
+    half = LW / 2.0
+    bot = select_nodes(model, (-half - EPS, half + EPS, -EPS, EPS))
+    top = select_nodes(model, (-half - EPS, half + EPS, gauge - EPS, gauge + EPS))
+    xb = [model.nodes[n].coords[0] for n in bot]
+    xt = [model.nodes[n].coords[0] for n in top]
+    if len(bot) != len(top) or max(abs(a - b) for a, b in zip(xb, xt)) > 1e-6:
+        raise ValueError(
+            f"gauge rows do not align: {len(bot)} nodes at y=0 vs {len(top)} at y={gauge:g}. "
+            f"The gauge height must be a whole number of mesh spacings.")
+    return xb, bot, top
+
+
+def gauge_strains(node_history, xs) -> list[list[float]]:
+    """Average vertical strain per column, for every sample in a runner's `node_history`.
+
+    The probe is asked for the two rows CONCATENATED (bottom then top), so each sample splits in
+    half and differences elementwise. Positive = tension (the column got longer).
+    """
+    n = len(xs)
+    out = []
+    for vals in node_history["values"]:
+        bot, top = vals[:n], vals[n:]
+        out.append([(t - b) / GAUGE_H for b, t in zip(bot, top)])
+    return out
+
+
+def neutral_axis(xs, strain) -> tuple[float, float, float]:
+    """Least-squares line through one strain profile: `(curvature, strain_at_centre, x_zero)`.
+
+    A plane section would make the profile exactly linear, so the fit is both a summary (curvature
+    = the slope, in 1/mm) and a test of that assumption. `x_zero` is where the fitted line crosses
+    zero — the neutral-axis position, which the paper reports — and is `nan` for a profile with no
+    gradient (a purely axial state, before any cracking localizes).
+    """
+    n = len(xs)
+    mx = sum(xs) / n
+    me = sum(strain) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxe = sum((x - mx) * (e - me) for x, e in zip(xs, strain))
+    slope = sxe / sxx if sxx else 0.0
+    intercept = me - slope * mx
+    x0 = -intercept / slope if abs(slope) > 1e-18 else float("nan")
+    return slope, intercept + slope * 0.0, x0

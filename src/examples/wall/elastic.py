@@ -27,7 +27,10 @@ from __future__ import annotations
 from rclattice import viz
 from rclattice.opensees import run_pushover
 
-from build import calibrate, cantilever_stiffness, gross_inertia, transformed_inertia, wall_lattice
+from build import (
+    calibrate, cantilever_stiffness, gross_inertia, report_calibration, transformed_inertia,
+    wall_lattice,
+)
 from specimen import (
     A_SHEAR, HORIZON, MESH, OUT, S14, TEST_UNIT, TW, base_nodes, control_node, lateral_loads,
 )
@@ -35,17 +38,23 @@ from specimen import (
 TARGET_DRIFT = 0.0010   # 0.10% — the test first yielded at 0.30%, so this is safely pre-cracking
 
 
-def report_calibration(cal, mesh_size: float) -> None:
-    """Print the energy balance and the isotropy diagnostics it implies."""
+def report_energy_balance(cal, mesh_size: float, horizon: float) -> None:
+    """The full calibration report: `build.report_calibration` (area + EA per zone) plus the
+    isotropy diagnostics that only this deep-dive script needs."""
     nominal = TW * mesh_size
     print("Aydin (2017) OLM energy balance  [Eqs 2.1-2.3, plane stress]")
+    report_calibration(cal, mesh_size=mesh_size, horizon=horizon)
     print(f"  lattice patch                {cal.n_nodes} nodes, {cal.n_struts} struts")
-    print(f"  calibrated strut area A_t    {cal.area:,.1f} mm^2  =  {cal.area / nominal:.4f} * (thickness * mesh)")
     print(f"  physical tributary area      {nominal:,.1f} mm^2  ->  lattice would be "
           f"{nominal / cal.area:.3f}x too stiff")
     print(f"  grid anisotropy |Ax-Ay|/Ax   {cal.anisotropy * 100:.2f}%   (eps_x vs eps_y balance)")
-    print(f"  lattice's own Poisson ratio  {cal.nu_consistent:.4f}   (where the normal and shear "
-          f"balances agree)")
+    # nu_consistent is NOT the lattice's Poisson ratio — it is where the two CALIBRATION ROUTES
+    # agree. The lattice's actual lateral response is nu_effective, and it is cubic-symmetric rather
+    # than isotropic at any nu (D53), which is why both numbers are printed.
+    print(f"  nu_consistent                {cal.nu_consistent:.4f}   (where the normal and shear "
+          f"balances agree — not a Poisson ratio)")
+    print(f"  lattice's own Poisson ratio  {cal.nu_effective:.4f}   (cubic anisotropy "
+          f"{cal.cubic_anisotropy:.3f}; 1.0 would be isotropic)")
     print(f"  using nu = {cal.nu:.2f}  ->  shear-stiffness error {cal.isotropy_error * 100:.2f}% "
           f"(the cost of the pinned nu)")
 
@@ -54,7 +63,7 @@ def main(*, mesh_size: float = MESH, horizon: float = HORIZON, draw: bool = Fals
     OUT.mkdir(parents=True, exist_ok=True)
 
     cal = calibrate(mesh_size=mesh_size, horizon=horizon)
-    report_calibration(cal, mesh_size)
+    report_energy_balance(cal, mesh_size, horizon)
 
     model = wall_lattice(cal.area, mesh_size=mesh_size, horizon=horizon)
     struts = sum(1 for e in model.elements if e.kind not in ("longitudinal", "stirrup"))
