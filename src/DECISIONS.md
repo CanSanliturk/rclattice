@@ -2798,3 +2798,64 @@ longer run settles it.
 
 **Status:** accepted. Supersedes nothing; extends D92/D93 (capacity), D95 (bond law) and D96 (`a`).
 Tests 55 pass, 1 known D34 failure.
+
+---
+
+### D98 — 2026-09-10 — Halving the mesh moves drift capacity 7.3%, inside the +/-6% damping scatter: the capacity ceiling is a property of the MODEL, not of the discretization. Peak strength does carry a small real mesh dependence (+5.6%). And the master matrix hid a run again, one axis down
+
+**Context.** D97 left every drift-capacity number in this study resting on one untested support: they
+were all measured at mesh 50. Crack-band regularization (D20) guarantees that the *dissipation* of a
+single softening strut is mesh-independent; it guarantees nothing about a **load-path collapse**,
+which is what sets capacity here (D55/D78/D87) and which depends on how many struts exist to
+redistribute among. So the question could not be answered by argument.
+
+**The run.** The `crushing / solved / perfect` cell with both failure switches (`eps_su = 0.05`,
+`concrete_residual = 0`) to 1.5% drift, rebuilt at **mesh 25** — 13,531 -> **48,662 elements**,
+2,806 -> **11,011 nodes** (3.60x the elements). Everything else identical, including zeta = 0.50 and
+the 7.6 mm/s drive. Explicit CentralDifference sized from `critical_time_step` as always: the stable
+step halves with the strut length, so 728 -> **1,464 steps/period** and 555,087 -> **1,113,594
+steps**. Cost **10.7 h against 2.3 h** (4.70x, i.e. 3.60x the elements x 2.01x the steps, less
+super-linear overhead than feared).
+
+| | mesh 50 | mesh 25 | ratio |
+|---|---|---|---|
+| peak (1 ms smoothed) | 961.0 kN | 1,015.1 kN | **1.056** |
+| /measured 963.6 kN | 0.997 | **1.053** | |
+| drift at peak | 0.646% | 0.770% | |
+| **80%-drop drift capacity** | **1.0328%** | **1.1084%** | **1.073** |
+| ascending-branch residual p95 | 7.73 kN (0.8%) | 6.47 kN (0.6%) | |
+
+**1. Capacity is mesh-objective at the precision this study can claim.** The 7.3% shift is the same
+size as the **+/-6% scatter D97 measured from damping alone** (1.113 / 1.152 / 1.033% at zeta =
+0.05 / 0.20 / 0.50). Two independent perturbations that touch nothing constitutive move capacity by
+about the same amount, which is the signature of a quantity set by *which struts crack in which
+step* rather than by the discretization. **The sweep's 0.591 / 1.033 / 1.155 / 1.374% ordering
+therefore stands** — those separations are 1.8x to 2.3x apart and survive a 7% wobble — but no
+capacity in this study should be quoted to better than about +/-7%.
+
+**2. Peak strength DOES have a small real mesh dependence, and it is not scatter.** +5.6%, against
+the ~+/-3% run-to-run scatter established for peak shear. At matched drift over 0.30-1.49% the
+mesh-25 curve sits at **mean 1.0515** of the mesh-50 curve (min 0.916, max 1.149 — the extremes are
+reversal/crack-release excursions, the mean is the signal). The finer grid is slightly stronger:
+more struts crossing the same section, and a finer crack band releasing in smaller increments. Worth
+one sentence in the write-up; it changes no conclusion, since **0.997 and 1.053 are both far closer
+to the measurement than Aydin's own 1.208x** on this specimen.
+
+**3. It also cuts the other way on his replication.** Aydin ran at **20 mm** — finer than either of
+ours — where our own trend says the model gets *stronger*. That weakens "mesh" as an explanation for
+his +21% overshoot and strengthens the constitutive reading already indicated by D87 and D97: an
+elastic compression law with no crushing, plus his bond parameters, is where his direction of error
+comes from.
+
+**4. Reporting defect, second instance.** Regenerating `master_report.md` put the mesh-25 run in the
+`crushing/solved/perfect` cell as the newest, so the matrix advertised **1.053x where the cell's
+headline is 0.997x**. Same class as D92's shadowed cyclic runs, one axis down: the matrix keys on
+comp x tail x bond x analysis, so *any* other parameter — mesh, eps_su, residual, damping — silently
+substitutes. Fixed by `master.variant_note()`: a row now names what is non-default about the run it
+is showing (`pushover (12, newest) — mesh 25, steel_rupture 0.05, concrete_residual 0`), rendered as
+an amber chip on the advisor page. **The general lesson, now twice learned: a matrix that reduces N
+runs to one cell must always say which run it picked and how it differs.**
+
+**Status:** accepted. Extends D92/D93/D97 (capacity) and D20 (crack-band regularization: dissipation
+is regularized, collapse drift is not — it is merely insensitive). Tests 55 pass, 1 known D34
+failure.

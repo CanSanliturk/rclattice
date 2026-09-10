@@ -40,6 +40,48 @@ def runs(root: Path) -> list[dict]:
     return out
 
 
+# Parameters worth naming when the run on show is not the cell's plain baseline. Deliberately a
+# SHORT list: `drift` and the protocol already appear in the run name, and listing everything would
+# bury the signal.
+VARIANT_KEYS = ("mesh", "damping", "steel_rupture", "concrete_residual", "bond_damage", "gf", "tw")
+
+
+def variant_note(params: dict) -> str:
+    """`mesh 25, damping 0.05` — how the shown run differs from the registry defaults."""
+    out = []
+    for name in VARIANT_KEYS:
+        spec = P.BY_NAME.get(name)
+        if spec is None or name not in params:
+            continue
+        v, d = params[name], spec.default
+        if v == d:
+            continue
+        if isinstance(v, bool):
+            out.append(name.replace("_", " "))
+        elif isinstance(v, float):
+            out.append(f"{name} {v:g}")
+        else:
+            out.append(f"{name} {v}")
+    return ", ".join(out)
+
+
+def _reach(d: dict) -> str:
+    """How far the run actually took the model.
+
+    `end_drift` is the LAST drift, which is right for a monotonic push and wrong for a cyclic
+    history: that ends back at the origin and reads as "-0.000%", as though the run went nowhere.
+    For a cyclic run the honest reach is the largest amplitude it reached.
+    """
+    disp = d.get("disp")
+    height = (d.get("meta") or {}).get("drift_denominator_mm")
+    if disp and height:
+        peak_amp = max(abs(u) for u in disp) / float(height)
+        end = abs(d.get("end_drift") or 0.0)
+        if peak_amp > end * 1.5:                      # a history that came back — quote the amplitude
+            return f"±{peak_amp:.3%}"
+    return f"{d.get('end_drift', 0):.3%}" if d.get("end_drift") else "—"
+
+
 def cell_row(params, rec) -> list:
     if rec is None:
         return ["—", "—", "—", "—", "not run"]
@@ -54,7 +96,7 @@ def cell_row(params, rec) -> list:
         f"{peak / 1e3:,.1f}{mark}" if peak else "—",
         f"{peak / 1e3 / 963.592:.3f}" if peak else "—",
         f"{peak_drift:.3%}" if peak else "—",
-        f"{d.get('end_drift', 0):.3%}" if d.get("end_drift") else "—",
+        _reach(d),
         f"[{rec['dir'].name}]({rec['dir'].name}/report.md)",
     ]
 
@@ -110,13 +152,35 @@ def build(root: Path) -> str:
     values = {a: P.BY_NAME[a].choices for a in AXES}
     lines = ["# Aldemir wall — parametric study, master report", "",
              f"{len(have)} run(s) found under `{root}`. Cells with no run are gaps, not omissions.",
+             "",
+             "One row per (cell, ANALYSIS). Keying the matrix on the three model axes alone hid "
+             "every run that was not the newest in its cell: all three cyclic runs sat in "
+             "`crushing/solved/perfect` behind a later pushover, and a cell whose newest run was "
+             "elastic showed a row of dashes as though it had produced nothing.",
              "", "## The matrix", "",
-             "| comp | tail | bond | peak (kN) | /test | drift@peak | traced to | run |",
-             "|---|---|---|---|---|---|---|---|"]
+             "| comp | tail | bond | analysis | peak (kN) | /test | drift@peak | traced to | run |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for comp, tail, bond in product(*(values[a] for a in AXES)):
-        got = index.get((comp, tail, bond))
-        newest = max(got, key=lambda r: r["dir"].name) if got else None
-        lines.append("| " + " | ".join([comp, tail, bond] + cell_row(None, newest)) + " |")
+        got = index.get((comp, tail, bond)) or []
+        by_kind: dict[str, list] = {}
+        for r in got:
+            by_kind.setdefault(r["params"]["analysis"], []).append(r)
+        if not by_kind:
+            lines.append("| " + " | ".join([comp, tail, bond, "—"] + cell_row(None, None)) + " |")
+            continue
+        # A stable, meaningful order rather than alphabetical: how far each analysis takes the model.
+        order = ["elastic", "static", "pushover", "cyclic"]
+        for kind in sorted(by_kind, key=lambda k: (order.index(k) if k in order else 99, k)):
+            newest = max(by_kind[kind], key=lambda r: r["dir"].name)
+            n = len(by_kind[kind])
+            label = kind if n == 1 else f"{kind} ({n}, newest)"
+            # The matrix axes are comp/tail/bond, so ANY other parameter shadows: the newest run
+            # in a cell may be a mesh or damping variant standing where the baseline used to be.
+            # Name what is non-default about the run actually shown (D98).
+            odd = variant_note(newest["params"])
+            if odd:
+                label += f" — {odd}"
+            lines.append("| " + " | ".join([comp, tail, bond, label] + cell_row(None, newest)) + " |")
 
     lines += ["", "## Analyses present", ""]
     by_analysis: dict[str, int] = {}

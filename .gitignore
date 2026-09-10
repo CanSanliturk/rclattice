@@ -62,3 +62,7 @@ recorder_*.txt
 *.fdb_latexmk
 *.synctex.gz
 *.out
+
+# Generated advisor report page (regenerate: study/report_page.py)
+src/examples/aydin_aldemir_wall/study/report_page.html
+src/examples/aydin_aldemir_wall/study/report_payload.json

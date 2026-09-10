@@ -723,6 +723,19 @@ the thin-nonlinear-beam lattice instability, D34).
   `perfect`/`bond60`/`bond70` — `nobond` used to mean PERFECT bond, the opposite of how it read.
   Legacy values are accepted forever via `params.LEGACY_VALUES`; nothing was migrated.
 
+  **MESH OBJECTIVITY (D98):** the whole capacity sweep was measured at mesh 50. Rebuilt at **mesh 25**
+  (13,531 -> 48,662 elements, 2.3 h -> 10.7 h) the same cell gives capacity **1.1084% vs 1.0328%** —
+  a **7.3% shift, the same size as D97's +/-6% damping scatter** — so the ceiling is a property of the
+  MODEL, not the discretization, and the 0.591/1.033/1.155/1.374% ordering stands (but quote no
+  capacity better than +/-7%). PEAK does move for real: **+5.6%** (961.0 -> 1,015.1 kN = 0.997 ->
+  **1.053x** measured), mean 1.0515 at matched drift. Note Aydin ran at 20 mm, FINER than either, where
+  our trend says stronger — so mesh does not explain his 1.208x. Crack-band regularization (D20)
+  regularizes DISSIPATION, not collapse drift; the latter is merely insensitive.
+  **REPORTING (D98, second instance of D92's defect):** the matrix keys on comp x tail x bond x
+  analysis, so any OTHER parameter silently substitutes — mesh 25 advertised 1.053x in the cell whose
+  headline is 0.997x. `master.variant_note()` now names what is non-default about the run shown
+  (amber chip on the advisor page). A matrix that reduces N runs to one cell must say which it picked.
+
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its
 cyclic/gauge/replot/compare scripts; the WSH3 cyclic run itself (staged: `cyclic.py --drift 0.0102 --gf-factor 2`, and see the
