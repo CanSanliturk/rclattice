@@ -130,6 +130,16 @@ def apply_material_overrides(params: dict) -> dict | None:
             "note": "epsc0 re-derived as 2fc/E (D56)"}
 
 
+def steel_b(params: dict) -> float | None:
+    """The steel hardening override, or None when it matches the specimen's own value.
+
+    Returning None rather than the equal value keeps the grade objects — and therefore the material
+    names and their caching — byte-identical to every run made before this parameter existed.
+    """
+    b = float(params["steel_b"])
+    return None if b == specimen.STEEL.b else b
+
+
 def build(params: dict):
     """(model, calibration, meta) for one cell. No solver."""
     if params["fcx"] != 1.0 and params["comp"] != "capped":
@@ -149,6 +159,7 @@ def build(params: dict):
         reinforced=bool(params["rebar"]), full_height_rebar=bool(params["rebar_top"]),
         steel_rupture=(float(params["steel_rupture"]) or None),
         concrete_residual=float(params["concrete_residual"]),
+        steel_b=steel_b(params),
         length=length, height=height, **bond_kwargs(params))
 
     meta = {
@@ -160,6 +171,7 @@ def build(params: dict):
         "fc_cap_MPa": fc_cap,
         "steel_rupture": float(params["steel_rupture"]) or None,
         "concrete_residual": float(params["concrete_residual"]),
+        "steel_b": float(params["steel_b"]),
         "gf_factor": gf_factor(params),
         "material_overrides": overrides,
         "area_mm2": cal.area,

@@ -2859,3 +2859,142 @@ runs to one cell must always say which run it picked and how it differs.**
 **Status:** accepted. Extends D92/D93/D97 (capacity) and D20 (crack-band regularization: dissipation
 is regularized, collapse drift is not — it is merely insensitive). Tests 55 pass, 1 known D34
 failure.
+
+---
+
+### D99 — 2026-09-10 — The monotonic collapse does NOT survive cycling: at 1.5% drift the cyclic wall carries 1.50x what the push carries. The 80%-drop capacity metric is meaningless on a cyclic trace and reported a number below the drift at peak. And the reason nothing degrades is that `epsU` is not a failure strain
+
+**The run.** `crushing / solved / perfect`, both failure switches (`eps_su = 0.05`,
+`concrete_residual = 0`), ladder to 1.5%, 8 levels x 1 cycle, 7.6 mm/s, zeta = 0.5. Converged,
+6,772,049 steps, 11.9 h. Built to be the CONTROLLED TWIN of the finished monotonic push
+(`2026-09-08_215009`): same 2,806 nodes / 13,531 elements, same dt_crit 10.006 us, same 728
+steps/period, same target. The only variable is monotonic against cyclic.
+
+**1. THE PUSH DEGRADES; THE CYCLING DOES NOT.** Every loop tip, 1 ms smoothed, against the
+monotonic twin at the same drift:
+
+| level | tip + | tip - | monotonic | cyc/mono | +tip/test |
+|---|---|---|---|---|---|
+| +/-0.075% | 794.8 | 781.0 | 794.8 | 1.00 | 0.825 |
+| +/-0.150% | 821.5 | 827.6 | 839.0 | 0.98 | 0.853 |
+| +/-0.225% | 880.1 | 845.3 | 907.0 | 0.97 | 0.913 |
+| +/-0.300% | 868.0 | 845.0 | 930.0 | 0.93 | 0.901 |
+| +/-0.450% | 924.2 | 837.3 | 951.1 | 0.97 | 0.959 |
+| +/-0.750% | **930.4** | 864.0 | 933.1 | 1.00 | **0.966** |
+| +/-1.125% | 925.8 | 882.1 | 740.6 | **1.25** | 0.961 |
+| +/-1.500% | 915.4 | 893.6 | 609.2 | **1.50** | 0.950 |
+
+(kN.) The push falls **36% below its peak by 1.5%**; the cyclic envelope is FLAT from 0.45% on —
+924 / 930 / 926 / 915, 1.6% off its maximum at the end. Peak **931.1 kN = 0.966x** the measured
+963.6 against the push's 0.997x, so cycling costs ~3% of STRENGTH and, measurably, **nothing of
+capacity**. Ascending-branch residual 0.6% of peak, so the peak is real resistance.
+
+So **the monotonic collapse is DIRECTIONAL** — a load path that must accumulate in one direction to
+fail, which every reversal re-shuffles — not strength the wall has lost. The pull side never
+degrades at all (781, 828, 845, 845, 837, 864, 882, 894, still rising at the last level): the first
+excursion of each level is positive, so the negative half always follows fresh damage and never gets
+to be the side that accumulates. **This lands on D97: drift capacity is not just "ours not his", it
+is a property of the LOADING PATH, and the 0.591/1.033/1.155/1.374% sweep is a MONOTONIC sweep.**
+
+**2. `drift_capacity` IS INVALID ON A CYCLIC RUN** and the report printed 0.6978%. The 80%-drop
+metric was written for a push; a cyclic trace crosses zero shear at every reversal, so it fires on
+an unloading branch. The tell is that it landed BELOW the drift at peak (0.744%), which is
+impossible for a capacity. On the tip envelope 80% of 930.4 is 744 kN and no later tip approaches
+it: capacity here is **> 1.5%, i.e. not reached**. Same class as D92 — a metric reported outside the
+domain it was written for. `metrics.py` must reduce a cyclic series to its TIP ENVELOPE first.
+
+**3. WHY NOTHING DEGRADES — `epsU` is not a failure strain.** Concrete02's compression branch is
+parabolic to (`fpc`, `epsc0`), LINEAR to (`fpcu`, `epsU`), then **constant at `fpcu` forever**.
+Verified through the real code path for this grade (fc 28, epsc0 0.002252, Gf 0.075, Gfc = 250 Gf):
+
+| `concrete_residual` | strut | `fpcu` | `epsU` / `epsc0` |
+|---|---|---|---|
+| 0.2 (default) | L = 50 | -5.600 | 10.91 |
+| 0.2 | L = 70.71 | -5.600 | **8.01** |
+| 0.0 | L = 50 | **-0.000** | 12.90 |
+| 0.0 | L = 70.71 | **-0.000** | 9.41 |
+
+Three compounding reasons: (a) at the default residual every "crushed" strut carries 5.6 MPa
+FOREVER; (b) `epsU` is 9-13x `epsc0`, i.e. 2.1-2.9% compressive strain; (c) the descent is linear
+across that whole range, so a strut at 2x `epsc0` still holds 91.6% of fc and at 5x still holds 66%.
+D87's count — only 2-19 of 10,905 struts ever pass `epsc0` — completes it. Removing the residual
+also LENGTHENS the branch, since `f_cu` sits in the denominator of `2*Gfc/((fc+fcu)*L)`.
+
+**4. A LATENT TRAP found while verifying (3): the compression clamp binds first on DIAGONALS.**
+`epsU = max(epsc0 + 2Gfc/((fc+fcu)L), grade.epsU)`, and at the DEFAULT residual the diagonal comes
+out at **8.01x `epsc0` against the grade floor of 8.0** — 0.1% of margin. So in every
+default-residual run the diagonals' compression crack-band regularization was riding the clamp
+rather than being set by strut length, and at mesh 100 it binds outright (4.5x against the 8.0
+floor). It affects no current result — the failure runs are all at residual 0, where diagonals sit
+at 9.41x — and tension `Ets` is untouched either way. Record it before a coarser mesh is tried.
+
+**5. NEW PARAMETER `steel_b` (schema v5).** Hardening was hardcoded at `b = 0.01`, an UNPRINTED
+convention exactly like `eps_su`: the paper gives f_y = 360 and nothing else. It is not negligible —
+a bar at `eps_su = 0.05` carries **1.27x f_y** — and it is one of the few things that could hold a
+flat cyclic envelope up. `--steel-b 0.0` gives elastic-perfectly-plastic ties. Default reproduces
+every earlier run byte-identically (`models.steel_b` returns None when it matches the specimen, so
+grade names and material caching are unchanged; verified: same 13,531 elements, Steel02 args
+identical at 0.01). A `b = 0` cyclic twin launched 23:20.
+
+**Status:** accepted. Extends D92 (metrics reported outside their domain), D97 (capacity is ours,
+and now also path-dependent) and D22/D91 (the residual floor). Tests 55 pass, 1 known D34 failure.
+
+---
+
+### D100 — 2026-09-10 — Read from the 2019 paper: Aydin calibrates exactly TWO things, elastic stiffness in closed form and tension against Cornelissen. THERE IS NO COMPRESSION CALIBRATION ANYWHERE. He also states he never calibrated bond per horizon — and his "Gf is the least important parameter" does not contradict D75, because he RE-FITS the tension tail whenever Gf moves
+
+**Why this was checked.** The study keeps hitting parameters the paper never prints — `eps_su`,
+`b`, `Gfc/Gf`, `residual_ratio`, every bond number. Before inventing more, the question was whether
+he calibrates anything we have been guessing at. Text extracted from the PDF in
+`examples/aydin_aldemir_wall/`, quotations verbatim.
+
+**What he calibrates — two things, and the abstract says so in one line:**
+> *"The force-deformation response of each element is calibrated from direct tension tests."*
+
+1. **Elastic, closed form, no fitting.** The energy balance gives `Et*At = 0.621*Et*d*w` at horizon
+   1.5d and `0.102` at 3.01d (his Appendix). `calibration.aydin_closed_form_C` reproduces both to
+   0.05% (D72).
+2. **Tension, an iterative fit done ONCE.** His Fig. 2 is a workflow: `a1, a2, a3` are adjusted
+   until the lattice's uniaxial stress-average-displacement response matches the **Cornelissen
+   et al. (1986)** stress-displacement model, iterating *"until the energy error is reduced below a
+   threshold value"*. Then: *"simulations of the test specimens were conducted as blind predictions
+   with the calibrated parameters."*
+
+**COMPRESSION: there is nothing to calibrate, by construction.**
+> *"Concrete in compression is assumed to be elastic. However, because of the mesoscale nature of
+> modeling, splitting cracks and cover spalling due to compression were simulated as indirect
+> tensile failures followed by lattice instability (Kendall 1978; Bazant et al. 1993; Bazant and
+> Xiang 1997)."*
+
+The 2017 thesis is the same and more explicit (Sec. 2.2, p. 30: out of scope). **A TRAP:** the paper
+does say *"beyond about 30% of its compressive strength"* — that sentence is about **Poisson's ratio**
+becoming variable after cracking (Kupfer et al. 1969), used to argue elastic-nu matching is not a
+prerequisite. It is NOT a compression constitutive knee and it reads like one.
+
+The only compression calibration in the trilogy is the **2021 cube paper**, and it is GEOMETRIC, not
+constitutive: `Rmax/d`, searched by repeated FE runs until the mean strength lands within 10% of fc,
+5 realizations per answer (D60). D61 already measured why it cannot be transplanted — perturbation
+only ever LOWERS strength, so no `Rmax/d` reaches fc on a Concrete02 lattice. His calibration
+presupposes his constitutive law.
+
+**BOND: he says outright that he did not calibrate it per horizon.**
+> *"This was remedied by reducing bond strength for the 3.01d horizon; however, no attempt was made
+> to calibrate the bond parameter separately for different horizons."*
+
+So the bond numbers D75/D80 could not find were never pinned by him either. Stop looking.
+
+**THE Gf CONTRADICTION IS RESOLVED, and it is a real trap.** His Fig. 12 sensitivity concludes Gf is
+the **LEAST important** parameter, while D75 measured `--gf-factor 2` at **+14.2% base shear**. Both
+are right, because of one sentence of his:
+> *"It should be noted that, upon changing Gf , the softening parameters of the tension model
+> [Fig. 1(c)] were calibrated separately for each simulation."*
+
+He RE-FITS `a1, a2, a3` every time Gf moves, so the change is absorbed by the refit and the tail
+keeps matching Cornelissen. We change Gf and let the tail move with it. **Different experiments — his
+"Gf doesn't matter" cannot be cited against D75, and D67's WSH3 `--gf-factor 2` is not licensed by
+it either.** His separate +/-10% CoV study on `a1, a2, a3, b1, b2` moves demands <= 2%, with
+`a1, a3, b1` dominating; that is about the FITTED parameters, not about Gf.
+
+**Status:** accepted. Constrains D75/D80 (stop hunting his bond parameters), reframes D67/D75 (the
+Gf sensitivity comparison was never like-for-like) and confirms D97 (no capacity exists inside his
+framework because no compression law does).

@@ -731,6 +731,26 @@ the thin-nonlinear-beam lattice instability, D34).
   **1.053x** measured), mean 1.0515 at matched drift. Note Aydin ran at 20 mm, FINER than either, where
   our trend says stronger — so mesh does not explain his 1.208x. Crack-band regularization (D20)
   regularizes DISSIPATION, not collapse drift; the latter is merely insensitive.
+  **CYCLIC vs MONOTONIC (D99):** the controlled twin of the 1.5% push, cyclic, 8-level ladder, 11.9 h.
+  **THE PUSH DEGRADES AND THE CYCLING DOES NOT** — loop tips 924/930/926/915 kN from 0.45% to 1.5%
+  against a monotonic twin that falls 951 -> 933 -> 741 -> 609, i.e. cyc/mono **1.25x at 1.125% and
+  1.50x at 1.5%**. Peak **931.1 kN = 0.966x** measured (push 0.997x), capacity **> 1.5%, not
+  reached**. So the monotonic collapse is DIRECTIONAL and D97's 0.591/1.033/1.155/1.374% sweep is a
+  MONOTONIC sweep. TWO TRAPS: `drift_capacity` is invalid on a cyclic series (it fires on an
+  unloading branch — it printed 0.6978%, BELOW the drift at peak; reduce to the tip envelope first),
+  and `epsU` is NOT a failure strain — Concrete02 holds `fpcu` flat forever past it, `epsU` is
+  9-13x `epsc0`, and a strut at 2x `epsc0` still holds 91.6% of fc. The compression clamp
+  `max(regularized, grade.epsU)` binds first on DIAGONALS: 8.01 vs the 8.0 floor at the default
+  residual (harmless at residual 0, binds outright at mesh 100). New `--steel-b` (schema v5):
+  hardening was hardcoded at 0.01, unprinted like eps_su, and worth 1.27x f_y at eps_su = 0.05.
+  **WHAT AYDIN ACTUALLY CALIBRATES (D100, read from the 2019 PDF):** exactly two things — elastic
+  `Et*At` in closed form, and TENSION fitted to Cornelissen (1986) via his Fig. 2 loop, after which
+  the specimens are BLIND predictions. **No compression calibration exists anywhere** ("Concrete in
+  compression is assumed to be elastic"); the only one in the trilogy is the 2021 cube's GEOMETRIC
+  `Rmax/d`. He also states he never calibrated bond per horizon, so stop hunting those numbers. And
+  his "Gf is the least important parameter" does NOT contradict D75's +14.2%: he RE-FITS a1/a2/a3
+  whenever Gf moves, so the comparison was never like-for-like — which also unsettles D67's WSH3
+  `--gf-factor 2`.
   **REPORTING (D98, second instance of D92's defect):** the matrix keys on comp x tail x bond x
   analysis, so any OTHER parameter silently substitutes — mesh 25 advertised 1.053x in the cell whose
   headline is 0.997x. `master.variant_note()` now names what is non-default about the run shown

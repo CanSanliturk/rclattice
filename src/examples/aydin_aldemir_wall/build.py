@@ -106,6 +106,26 @@ def _bond_material(bond_area: float, strut_area: float):
     return make
 
 
+def _bars(mesh_size, length, height, full_height, reinforced, steel_b):
+    """The bar set, with an optional override of the steel hardening ratio `b`.
+
+    `b` is NOT a number the paper gives — Table 1 prints f_y = 360 and nothing about hardening, so
+    the repo's 0.01 is a convention, exactly like eps_su (D91). `steel_b=0.0` makes the ties
+    elastic-perfectly-plastic, which is the controlled way to ask how much of a flat cyclic
+    envelope is strain hardening rather than an absent failure mechanism.
+    """
+    import dataclasses
+
+    if not reinforced:
+        return ()
+    bars = rebars(mesh_size, length=length, height=height, full_height=full_height)
+    if steel_b is None:
+        return bars
+    return tuple(dataclasses.replace(
+        r, steel=dataclasses.replace(r.steel, name=f"{r.steel.name}-b{steel_b:g}", b=float(steel_b)))
+        for r in bars)
+
+
 def wall_lattice(
     area: float,
     *,
@@ -128,6 +148,7 @@ def wall_lattice(
     bond_damage: bool = False,
     steel_rupture: float | None = None,
     concrete_residual: float = 0.2,
+    steel_b: float | None = None,
 ):
     """The calibrated RC lattice. `nonlinear=False` gives the linear-material twin for `elastic.py`.
 
@@ -234,8 +255,7 @@ def wall_lattice(
         wall_problem(length=length, height=height), mesh_size,
         material_for=material_for,
         zone_of=zone_of,
-        rebars=(rebars(mesh_size, length=length, height=height,
-                       full_height=full_height_rebar) if reinforced else ()),
+        rebars=_bars(mesh_size, length, height, full_height_rebar, reinforced, steel_b),
         strut_area=area,
         horizon=horizon,
         strut_element=strut_element,

@@ -26,7 +26,10 @@ from typing import Any, Callable
 # adds a parameter.
 # Runs written under an older version stay readable: the master report fills a missing parameter
 # with today's default and says which it filled.
-SCHEMA_VERSION = 4    # 4: comp/bond values renamed (D94); older records are read through LEGACY_VALUES, not migrated
+# v5 (2026-09-10): added `steel_b`. Hardening was hardcoded at 0.01, an unprinted convention that
+# raises a yielded bar 27% by eps_su = 0.05 and is therefore a candidate for the flat cyclic
+# envelope of D99. Default reproduces every earlier run exactly.
+SCHEMA_VERSION = 5    # 4: comp/bond values renamed (D94); older records are read through LEGACY_VALUES, not migrated
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,10 @@ REGISTRY: tuple[Param, ...] = (
     Param("concrete_residual", "res", 0.2,
           "crushing strength floor as a fraction of fc; D22's 0.2 was for Newton solvers, 0 lets a "
           "strut crush to nothing under the explicit march", "model", type=float),
+    Param("steel_b", "sb", 0.01,
+          "steel strain-hardening ratio; 0 = elastic-perfectly-plastic ties. NOT given by the paper "
+          "(Table 1 prints f_y only), so 0.01 is a convention like eps_su, and it props up a flat "
+          "cyclic envelope: a bar at eps_su = 0.05 carries 1.27x f_y", "model", type=float),
 
     # --- reinforcement -----------------------------------------------------------------------
     Param("rebar_top", "rebartop", True, "run the longitudinal bars to the top face (D78/D84)",
