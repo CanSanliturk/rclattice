@@ -743,6 +743,23 @@ the thin-nonlinear-beam lattice instability, D34).
   `max(regularized, grade.epsU)` binds first on DIAGONALS: 8.01 vs the 8.0 floor at the default
   residual (harmless at residual 0, binds outright at mesh 100). New `--steel-b` (schema v5):
   hardening was hardcoded at 0.01, unprinted like eps_su, and worth 1.27x f_y at eps_su = 0.05.
+  **HARDENING IS THE LARGEST CONTROL ON CAPACITY, AND IT IS UNPRINTED (D101).** `--steel-b 0.0` on
+  the same 1.5% ladder: peak **853.8 kN = 0.886x** measured (twin 0.966x) at **0.210% drift instead
+  of 0.744%**, and the tip envelope falls off a cliff in one level (790.9 -> 327.2 kN) crossing 80%
+  at **0.503%** where the twin never crossed it at all through 1.5%. So **b is worth 3x on drift
+  capacity and 9% on peak** — the split confirming D87, since peak is a tension-cracking quantity
+  and capacity is a LOCALIZATION one. WHY the pre-run estimate (+4.6%) was wrong is the lesson: `b`
+  adds POST-YIELD STIFFNESS, without which the post-yield strain distribution is indeterminate and
+  one bar row runs away to eps_su and ruptures. Predicts b = 1e-4 behaves like 0 (E_h = 20 MPa is
+  0.11% of f_y at 2% strain); the usual implicit-solver reason for 1e-4 does not apply under
+  CentralDifference. The test reached ~0.89% drift, so it BRACKETS the two and `b` is a fittable
+  parameter with a measured target, like eps_su. **D97/D98 capacity numbers all carry b = 0.01**,
+  and SW-NC-FF/WSH3 carry the same convention.
+  **CYCLIC CAPACITY METRIC (D101):** `drift_capacity` fired on unloading branches and printed
+  0.6978% / 0.1934%, both BELOW their own peak drift. `metrics.py` now finds reversals, pairs +/-
+  tips into one point per amplitude LEVEL and interpolates the 20%-drop crossing on that envelope,
+  reporting `capacity_basis`, `peak_tip_shear` and `drift_capacity_bracket`. Rescored: all four
+  earlier cyclic runs go from bogus values to **None — they never fell to 80%**.
   **WHAT AYDIN ACTUALLY CALIBRATES (D100, read from the 2019 PDF):** exactly two things — elastic
   `Et*At` in closed form, and TENSION fitted to Cornelissen (1986) via his Fig. 2 loop, after which
   the specimens are BLIND predictions. **No compression calibration exists anywhere** ("Concrete in

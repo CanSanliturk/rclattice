@@ -2998,3 +2998,90 @@ it either.** His separate +/-10% CoV study on `a1, a2, a3, b1, b2` moves demands
 **Status:** accepted. Constrains D75/D80 (stop hunting his bond parameters), reframes D67/D75 (the
 Gf sensitivity comparison was never like-for-like) and confirms D97 (no capacity exists inside his
 framework because no compression law does).
+
+---
+
+### D101 — 2026-09-11 — Strain hardening is the largest single control on drift capacity in this study, and it is a number the paper never prints: `b = 0` gives 0.50% where `b = 0.01` gives > 1.5%. Peak strength barely moves. And the cyclic capacity metric was wrong a SECOND time, so it is now read off the tip envelope
+
+**The experiment.** D99 left the flat cyclic envelope with two candidate causes — strain hardening
+in the ties, or the directional load-path argument. `--steel-b 0.0` (D99 §5) isolates the first:
+the exact twin of the 1.5% ladder, elastic-perfectly-plastic ties, nothing else changed. Converged,
+11.4 h, ascending-branch residual 0.6% of peak.
+
+**1. THE WALL IS DESTROYED.** Loop tips, 1 ms smoothed, against the `b = 0.01` twin:
+
+| level | b = 0 | b = 0.01 | ratio | b=0 / test |
+|---|---|---|---|---|
+| +/-0.075% | 807.3 / 776.6 | 794.8 / 781.0 | 1.02 / 0.99 | 0.838 |
+| +/-0.150% | 808.4 / 781.2 | 821.5 / 827.6 | 0.98 / 0.94 | 0.839 |
+| +/-0.225% | **852.7** / 779.2 | 880.1 / 845.3 | 0.97 / 0.92 | **0.885** |
+| +/-0.300% | 843.6 / 805.4 | 868.0 / 845.0 | 0.97 / 0.95 | 0.875 |
+| +/-0.450% | 790.9 / 759.3 | 924.2 / 837.3 | 0.86 / 0.91 | 0.821 |
+| +/-0.750% | **327.2** / 321.9 | 930.4 / 864.0 | **0.35 / 0.37** | 0.340 |
+| +/-1.125% | 120.2 / 48.8 | 925.8 / 882.1 | 0.13 / 0.06 | 0.125 |
+| +/-1.500% | 48.8 / 55.6 | 915.4 / 893.6 | 0.05 / 0.06 | 0.051 |
+
+(kN.) Peak **853.8 kN = 0.886x** the measured 963.6 against the twin's 0.966, and it arrives at
+**0.210% drift instead of 0.744%** — a sharp peak, not a plateau. The envelope then falls off a
+cliff in ONE level, 790.9 -> 327.2, and crosses 80% of peak at **0.503% drift** (bracket
+0.450-0.750%, since the envelope is only sampled at the protocol's amplitudes). The twin never
+crossed 80% at all through 1.5%. At matched displacement: 0.870x the test envelope at 6.75 mm,
+**0.491x at 13.5 mm** — half the wall already gone where the test was still carrying.
+
+**So one unprinted parameter is worth a factor of three on drift capacity, and 9% on peak.** The
+split is itself the result: peak strength is a TENSION-CRACKING quantity (D87) and barely notices;
+capacity is a localization quantity and is dominated by it.
+
+**2. WHY IT IS FAR BIGGER THAN THE ARITHMETIC SAID — the useful part.** The prediction made before
+the run was +4.6% at 1% bar strain, from `E_h*eps`. That is the wrong quantity. `b` does not merely
+add force, it adds **post-yield stiffness**, and post-yield stiffness is what prevents strain
+LOCALIZING. Two ways to see it: (a) in a chain of EPP links the post-yield strain distribution is
+INDETERMINATE — every distribution satisfies equilibrium at the same force — so the solver's answer
+is set by whatever asymmetry it meets first; any `b > 0` makes force strictly increasing in strain
+and restores uniqueness. (b) Mechanically, a hardened bar pushes its NEIGHBOUR into yield instead of
+straining further itself, spreading yield over many rows; an EPP bar does not, so one row runs away
+to `eps_su = 0.05` and ruptures. This is exactly why codes impose minimum hardening and uniform
+elongation, and the model reproduced it unprompted. **A stability problem was estimated as an
+arithmetic one.**
+
+The same reasoning predicts `b = 1e-4` behaves like `b = 0`, not like 0.01: `E_h` = 20 MPa supplies
+0.4 MPa at 2% bar strain = 0.11% of f_y, ~100x too weak against the disturbances an explicit march
+on cracking concrete generates. Uniqueness that weak is uniqueness the solver cannot find. NOTE the
+usual reason for `b = 1e-4` — avoiding a singular tangent in implicit Newton — does not apply here
+at all, since CentralDifference never assembles a tangent (D74). A sweep at
+**b = 0 / 1e-4 / 1e-3 / 1e-2** as parallel pushovers was launched 11:08 to measure this instead of
+arguing it.
+
+**3. THE TEST BRACKETS THE TWO.** Fig. 10(b) reaches -18.9 / +16.0 mm and the specimen got to about
+20 mm, i.e. **~0.89% drift**. `b = 0` is finished by 0.50%; `b = 0.01` passes 1.5% undamaged. The
+real wall lies between them — and this specimen is reinforced with **O8 welded mesh**, which
+genuinely has low hardening and low uniform elongation, so 0.01 may be generous for it. `b` is
+therefore not just an uncertainty, it is a FITTABLE parameter with a measured target, which is
+exactly the status `eps_su` has (D91) and the reason both must be declared whenever a capacity is
+quoted.
+
+**4. THE CYCLIC CAPACITY METRIC FAILED AGAIN, AND IS NOW FIXED.** `drift_capacity` applied an
+80%-drop rule to the trace itself; a cyclic trace crosses zero shear at EVERY reversal, so it fires
+on the first unloading branch. It printed **0.6978%** on the `b = 0.01` ladder and **0.1934%** on
+this one, both BELOW their own drift at peak, which is impossible for a capacity. Reported twice
+before it was caught.
+
+`metrics.py` now detects reversals (`turning_points`, a peak-valley filter with a 5%-of-amplitude
+hysteresis — a monotonic push yields <= 1 candidate, the 8-level ladder yields 17), pairs the +/-
+tips into one envelope point per AMPLITUDE LEVEL, and reads the 20%-drop crossing off that envelope
+with linear interpolation, reporting `capacity_basis`, `peak_tip_shear` and
+`drift_capacity_bracket`. Rescoring the finished cyclic runs: **all four earlier ones go from a
+bogus 0.0035 / 0.453 / 0.453 / 0.698% to `None` — they never fell to 80%** — and this run reads
+0.503%. Same class as D92: a metric quoted outside the domain it was written for. The basis is now
+NAMED in every record so the domain is visible.
+
+**5. WHAT THIS DOES TO EARLIER ENTRIES.** D97's capacity sweep (0.591 / 1.033 / 1.155 / 1.374%) and
+D98's mesh-objectivity check were all run at `b = 0.01`; their ORDERING stands but every value
+carries a hardening assumption larger than the +/-6% damping scatter and the 7.3% mesh shift
+combined. D99's directional load-path reading is not refuted — both effects can hold — but
+hardening is plainly the larger term. **SW-NC-FF and WSH3 carry the same `b = 0.01` convention**, and
+SW-NC-FF's unexplained "no post-peak degradation, 1.34x at 4% drift" now has a second suspect that
+costs one flag to test.
+
+**Status:** accepted. Extends D91 (unprinted failure parameters), D92/D99 (metrics outside their
+domain) and D97/D98 (capacity). Tests 55 pass, 1 known D34 failure.

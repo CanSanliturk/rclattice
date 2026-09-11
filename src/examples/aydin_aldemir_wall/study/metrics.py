@@ -23,6 +23,33 @@ WINDOW_S = 1.0e-3          # the default smoothing window; see the module docstr
 RINGING_FLAG = 0.02        # raw/smoothed above this and the raw peak is reporting ringing
 DROP = 0.20                # drift capacity = where the smoothed response falls to 80% of peak
 PLATEAU = 0.005            # the peak is "flat" over the drift range holding within 0.5% of it
+REVERSAL = 0.05            # a direction change counts as a reversal at this fraction of max|disp|
+
+
+def turning_points(x, *, rel_tol: float = REVERSAL) -> list[int]:
+    """Indices of the SIGNIFICANT reversals in `x` — a peak-valley filter with hysteresis.
+
+    A prescribed drive history is smooth, so the raw sign changes of its increment are already
+    nearly the loop tips (17 on the 8-level ladder, 1 on a monotonic push). The `rel_tol` filter
+    removes that stray one and any numerical wiggle: a candidate is a reversal only if the
+    excursion since the last accepted one is at least `rel_tol` of the largest amplitude in the
+    series. So a pushover returns [] or one entry and a cyclic run returns its tips.
+    """
+    x = np.asarray(x, float)
+    if x.size < 3:
+        return []
+    tol = rel_tol * float(np.max(np.abs(x)))
+    if not np.isfinite(tol) or tol <= 0:
+        return []
+    kept: list[int] = []
+    for i in (np.flatnonzero(np.diff(np.sign(np.diff(x))) != 0) + 1):
+        i = int(i)
+        if kept and abs(x[i] - x[kept[-1]]) < tol:
+            if abs(x[i]) > abs(x[kept[-1]]):     # a wiggle: keep the more extreme of the two
+                kept[-1] = i
+            continue
+        kept.append(i)
+    return kept
 
 
 def moving_average(y, w: int):
@@ -83,12 +110,55 @@ def response_metrics(shear, disp, *, dt: float, height: float, window_s: float =
         out["peak_plateau"] = [float(drift[on_top[0]]), float(drift[on_top[-1]])]
         out["peak_plateau_fraction"] = plateau
 
-    # DRIFT CAPACITY: where the smoothed response first falls to (1-`drop`) of its peak AFTER the
-    # peak — the same 20%-drop convention the test literature uses (and which WSH3 never met, so
-    # its 2.04% is a lower bound). Measured on the smoothed curve because the raw one crosses the
-    # threshold repeatedly while ringing.
-    below = np.flatnonzero(sm[i_sm:] < (1.0 - drop) * peak_sm)
+    # DRIFT CAPACITY: where the response first falls to (1-`drop`) of its peak AFTER the peak —
+    # the same 20%-drop convention the test literature uses (and which WSH3 never met, so its 2.04%
+    # is a lower bound). Measured on the smoothed curve because the raw one crosses the threshold
+    # repeatedly while ringing.
+    #
+    # A CYCLIC SERIES MUST BE REDUCED TO ITS TIP ENVELOPE FIRST (D101). Applied to the trace itself
+    # the rule fires on the first UNLOADING branch, because the shear passes through zero at every
+    # reversal: it reported 0.6978% on the b = 0.01 ladder and 0.1934% on the b = 0 one, both BELOW
+    # their own drift at peak, which is impossible for a capacity. The envelope is |V| at the loop
+    # tips, and the capacity is the drift of the first tip after the largest that falls below the
+    # threshold. Reported twice in a row before it was caught, so the basis is now named in the
+    # output.
     out["capacity_drop"] = drop
+    turns = turning_points(disp)
+    if len(turns) >= 2:
+        # One envelope point per AMPLITUDE LEVEL: the tips come in +/- pairs at the same |drift|,
+        # so pairing them up first is what makes the envelope a function of drift and therefore
+        # interpolable. Levels are ordered by drift, not by time, so a protocol that revisits an
+        # amplitude still yields one envelope.
+        tip_d, tip_v = np.abs(drift[turns]), np.abs(sm[turns])
+        order = np.argsort(tip_d, kind="stable")
+        tip_d, tip_v = tip_d[order], tip_v[order]
+        edges = np.flatnonzero(np.diff(tip_d) > 1e-9) + 1
+        lv_d = np.array([g[0] for g in np.split(tip_d, edges)])
+        lv_v = np.array([g.max() for g in np.split(tip_v, edges)])
+        k = int(np.argmax(lv_v))
+        thr = (1.0 - drop) * lv_v[k]
+        after = np.flatnonzero(lv_v[k:] < thr)
+        out["capacity_basis"] = f"cyclic tip envelope, {len(turns)} tips over {lv_d.size} levels"
+        out["peak_tip_shear"] = float(lv_v[k])
+        if after.size:
+            j = k + int(after[0])
+            # Linear between the last level above the threshold and the first below, which is how a
+            # test envelope is read. The BRACKET is reported too: the envelope is only SAMPLED at
+            # the protocol's amplitudes, so the crossing is known only to lie between them, and on
+            # a cliff (790.9 -> 327.2 kN in one level) that bracket is wide.
+            d0, v0, d1, v1 = lv_d[j - 1], lv_v[j - 1], lv_d[j], lv_v[j]
+            f = (v0 - thr) / (v0 - v1) if v0 > v1 else 0.0
+            out["drift_capacity"] = float(d0 + f * (d1 - d0))
+            out["drift_capacity_bracket"] = [float(d0), float(d1)]
+        else:
+            out["drift_capacity"] = None
+            out["drift_capacity_note"] = (
+                f"no level after the strongest fell to {1 - drop:.0%} of it — the ladder ended at "
+                f"{lv_d[-1]:.4%} drift still above the threshold, so this is a LOWER BOUND")
+        return out
+
+    out["capacity_basis"] = "monotonic"
+    below = np.flatnonzero(sm[i_sm:] < (1.0 - drop) * peak_sm)
     out["drift_capacity"] = float(drift[i_sm + below[0]]) if below.size else None
     if not below.size:
         out["drift_capacity_note"] = (f"never fell to {1 - drop:.0%} of peak — the run ended at "
