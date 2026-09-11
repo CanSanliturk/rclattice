@@ -66,3 +66,6 @@ recorder_*.txt
 # Generated advisor report page (regenerate: study/report_page.py)
 src/examples/aydin_aldemir_wall/study/report_page.html
 src/examples/aydin_aldemir_wall/study/report_payload.json
+
+# Source-figure crops digitized from published papers — kept local, never published
+src/examples/*/data/*.png

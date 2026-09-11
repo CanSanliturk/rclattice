@@ -59,6 +59,10 @@ F_SIM_15, F_SIM_301, F_EXP = 1164.413, 1325.675, 963.592
 def panel() -> np.ndarray:
     """Extract the Fig. 10(b) bitmap from the PDF (cached under data/)."""
     DATA.mkdir(exist_ok=True)
+    # NOT IN THE REPOSITORY, deliberately: this is a verbatim crop of Fig. 10(b) of the ASCE
+    # paper, and the repo is public. The digitized OUTPUT (`fig10b.npz`) is committed, so nothing
+    # downstream needs this file. To re-run the digitizing, crop the figure from the PDF yourself
+    # and save it here at the same name.
     png = DATA / "fig10b_panel.png"
     if not png.exists():
         if not PDF.exists():
