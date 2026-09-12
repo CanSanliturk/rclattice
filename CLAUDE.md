@@ -755,6 +755,22 @@ the thin-nonlinear-beam lattice instability, D34).
   CentralDifference. The test reached ~0.89% drift, so it BRACKETS the two and `b` is a fittable
   parameter with a measured target, like eps_su. **D97/D98 capacity numbers all carry b = 0.01**,
   and SW-NC-FF/WSH3 carry the same convention.
+  **THE b x eps_su GRID (D102), seven pushovers, parallel is free (71 vs 68 steps/s):**
+  **`b = 1e-4` IS `b = 0`** — capacity 0.476% vs 0.476%, peak within 0.1%, curves superposed — because
+  E_h = 20 MPa is 0.11% of f_y at 2% strain, ~100x too weak to beat the disturbances of an explicit
+  march; uniqueness that weak is uniqueness the solver cannot find. **The transition is a climb that
+  ACCELERATES**: 0.476 / 0.476 / 0.575 / 1.033% over four decades, +80% in the last one alone, which is
+  where real reinforcement sits. **THE TWO LEVERS INTERACT** — the eps_su 0.05/0.025 ratio climbs
+  1.529 / 1.576 / 1.745 with b — so **the uncertainty stays TWO-DIMENSIONAL**: no composite parameter
+  works (not b*eps_su, and b*E*(eps_su-eps_y) runs backwards), and both must be declared with every
+  capacity. Mechanism: capacity ~ eps_su x (rows participating), b sets the second factor, and more
+  ductility lets the wall LOCALIZE further so fewer rows share. **D99's cyclic enhancement is
+  CONDITIONAL ON HARDENING** — at b = 0 monotonic and cyclic capacities agree (0.476 vs 0.503%), at
+  b = 0.01 they do not (1.033% vs never reached). **BLIND PREDICTION HELD:** code-minimum O8 welded mesh
+  (EN 1992 Class A) gives b = 0.0036 / eps_su = 0.025; ~0.45% was predicted, 0.480% measured, undershooting
+  the test's ~0.89% by 1.85x. THE FORK IS UNCLOSEABLE HERE: real mesh above code minimum, or a systematic
+  capacity deficit. **PEAK REFUSES TO MOVE: 926.6-961.0 kN = 0.962-0.997x across a grid spanning 3.3x in
+  capacity** — the sharpest form of D87's split, and why Aydin's 1.208x reads as constitutive.
   **CYCLIC CAPACITY METRIC (D101):** `drift_capacity` fired on unloading branches and printed
   0.6978% / 0.1934%, both BELOW their own peak drift. `metrics.py` now finds reversals, pairs +/-
   tips into one point per amplitude LEVEL and interpolates the 20%-drop crossing on that envelope,

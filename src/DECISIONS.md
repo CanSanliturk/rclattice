@@ -3085,3 +3085,92 @@ costs one flag to test.
 
 **Status:** accepted. Extends D91 (unprinted failure parameters), D92/D99 (metrics outside their
 domain) and D97/D98 (capacity). Tests 55 pass, 1 known D34 failure.
+
+---
+
+### D102 — 2026-09-12 — The hardening sweep and the `b` x `eps_su` grid: `b = 1e-4` is `b = 0` to three decimals, the transition is a climb that accelerates, the two unprinted parameters INTERACT so the uncertainty stays two-dimensional, and peak strength refuses to move across a grid whose capacity spans 3.3x
+
+**Why.** D101 left `b` as the largest known control on drift capacity and a number the paper never prints.
+Two questions followed: where the transition sits (and whether `b = 1e-4`, the value people use to keep
+an implicit solver out of a singular tangent, behaves like zero), and whether `b` and `eps_su` — both
+unprinted, both controlling capacity — are one lever or two. Seven pushovers, mesh 50, `crushing/solved/
+perfect`, `concrete_residual = 0`, zeta = 0.5, to 1.5% drift. **Parallel is free on this machine: three
+at once ran at 71 steps/s against 68 solo**, so a sweep costs one run's wall time, not N.
+
+**1. THE SWEEP (eps_su = 0.05).**
+
+| b | peak kN | /test | drift at peak | capacity |
+|---|---|---|---|---|
+| 0 | 929.0 | 0.964 | 0.327% | **0.476%** |
+| 1e-4 | 929.9 | 0.965 | 0.328% | **0.476%** |
+| 1e-3 | 936.8 | 0.972 | 0.442% | 0.575% |
+| 0.01 | 961.0 | 0.997 | 0.646% | **1.033%** |
+
+**`b = 1e-4` IS `b = 0`** — capacity identical to three decimals, peak within 0.1%, drift at peak within
+0.001%, curves superposed at every matched drift to 0.45% (ratios 1.0000 / 1.0013 / 1.0004 / 1.0007).
+D101 predicted exactly this: any `b > 0` restores UNIQUENESS of the post-yield strain distribution in
+principle, but `E_h` = 20 MPa supplies 0.4 MPa at 2% bar strain = 0.11% of f_y, ~100x too weak to
+compete with the disturbances an explicit march on cracking concrete generates. **Uniqueness that weak
+is uniqueness the solver cannot find.** NOTE the usual reason for `b = 1e-4` does not apply here at all:
+CentralDifference never assembles a tangent (D74).
+
+**THE TRANSITION IS NOT A THRESHOLD.** Capacity goes 0.476 -> 0.476 -> 0.575 -> 1.033% across four
+decades: nothing from 0 to 1e-4, +21% to 1e-3, then **+80% in the last decade alone**. Almost everything
+hardening buys this wall is bought between 0.001 and 0.01 — exactly where real reinforcement sits, which
+is why the convention was never innocuous.
+
+**2. A RESULT THAT TIES D99 TO D101.** At `b = 0` the monotonic and cyclic capacities AGREE — 0.476%
+pushed against 0.503% cycled — while at `b = 0.01` they disagree completely (1.033% pushed, never
+reached cycled). **So D99's cyclic enhancement exists ONLY when the ties harden.** Reversals can
+re-shuffle a load path only if hardening gives them somewhere to shuffle it into; with EPP ties the wall
+collapses the same way whichever path it is driven along. D99 must be read with this attached.
+
+**3. THE GRID — the two levers INTERACT.**
+
+| b | eps_su = 0.025 | eps_su = 0.05 | ratio |
+|---|---|---|---|
+| 0 | (running) | 0.476% | — |
+| 1e-4 | 0.311% | 0.476% | 1.529 |
+| 1e-3 | 0.365% | 0.575% | 1.576 |
+| 0.0036 | **0.480%** | — | — |
+| 0.01 | 0.592% | 1.033% | 1.745 |
+
+Independent levers would give a CONSTANT ratio column. It climbs **1.529 -> 1.576 -> 1.745**, and the
+`b`-dependence is correspondingly flatter at the lower ductility (1.90x across the row at eps_su = 0.025
+against 2.17x at 0.05). **THE UNCERTAINTY THEREFORE STAYS TWO-DIMENSIONAL — there is no single composite
+parameter to quote a capacity against, and both must be declared every time one is.** Two obvious
+candidates were tested and both fail: capacity is not a function of `b*eps_su`, and not a function of the
+hardening stress gain `b*E*(eps_su - eps_y)` either — that one runs BACKWARDS (Deltasigma = 0.96 MPa
+gives 0.476% while 4.64 MPa gives 0.365%).
+
+**The interaction has the D101 mechanism behind it.** Every ratio is BELOW 2.0, where doubling eps_su
+would double capacity exactly if the same number of bar rows participated. They do not: with more
+ductility available the wall LOCALIZES FURTHER before failing, so fewer rows share the demand. Hardening
+is what forces sharing, which is why the ratio climbs toward 2.0 as `b` rises. **Capacity ~ eps_su x
+(rows participating), and `b` sets the second factor.**
+
+**4. A BLIND PREDICTION, AND IT HELD.** Code-minimum O8 cold-worked welded mesh (EN 1992 Class A:
+f_t/f_y ~ 1.05 at A_gt ~ 2.5%) gives `E_h` = 0.05*360/0.025 = 720 MPa, i.e. **b = 0.0036, eps_su =
+0.025** — derived from the reinforcement class, not tuned. ~0.45% was put on the record before the run;
+it returned **0.480%**, within 7%, and undershoots the test's ~0.89% by **1.85x**, also as predicted.
+Note `b = 0.0036` lands inside the 0.003-0.005 window the sweep independently pointed at.
+**THE FORK THIS OPENS CANNOT BE CLOSED WITH THIS SPECIMEN:** either the real mesh comfortably exceeded
+code minimums (normal, and unverifiable from anything in the repo — the 2017 test paper is absent), or
+the model carries a systematic capacity deficit. Say so wherever a capacity is quoted.
+
+**5. PEAK STRENGTH REFUSES TO MOVE.** 926.6 to 961.0 kN — **0.962 to 0.997x** the measured 963.6 —
+across a grid whose capacity spans **3.3x**. This is now the best-evidenced claim in the study and the
+sharpest form of D87's split: peak is a TENSION-CRACKING quantity that no reinforcement parameter
+reaches, capacity is a LOCALIZATION quantity that they jointly determine. It also strengthens the
+reading of Aydin's 1.208x as constitutive rather than parametric — our peak will not go there for any
+`b` or `eps_su`.
+
+**6. A DESIGN SLIP, recorded.** The eps_su = 0.025 row was framed as ALSO testing whether the
+"`1e-4` = `0`" floor survives at lower ductility, but it was launched with `b = 1e-4` and no `b = 0`
+partner, so that question went unanswered by construction. The missing cell is running. Cheap to fix
+here; the general point is that a sweep designed to answer two questions has to carry the control for
+both.
+
+**Status:** accepted. Extends D101 (hardening), D99 (cyclic enhancement — now conditional on hardening),
+D97 (the eps_su sweep was run at b = 0.01, the high corner of this grid) and D87 (peak vs capacity).
+SW-NC-FF and WSH3 both carry `b = 0.01`. Tests 55 pass, 1 known D34 failure.
