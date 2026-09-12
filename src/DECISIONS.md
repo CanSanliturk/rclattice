@@ -3129,15 +3129,24 @@ collapses the same way whichever path it is driven along. D99 must be read with 
 
 | b | eps_su = 0.025 | eps_su = 0.05 | ratio |
 |---|---|---|---|
-| 0 | (running) | 0.476% | — |
+| 0 | 0.308% | 0.476% | 1.546 |
 | 1e-4 | 0.311% | 0.476% | 1.529 |
 | 1e-3 | 0.365% | 0.575% | 1.576 |
 | 0.0036 | **0.480%** | — | — |
 | 0.01 | 0.592% | 1.033% | 1.745 |
 
-Independent levers would give a CONSTANT ratio column. It climbs **1.529 -> 1.576 -> 1.745**, and the
-`b`-dependence is correspondingly flatter at the lower ductility (1.90x across the row at eps_su = 0.025
-against 2.17x at 0.05). **THE UNCERTAINTY THEREFORE STAYS TWO-DIMENSIONAL — there is no single composite
+Independent levers would give a CONSTANT ratio column. It does not stay constant — it reads
+**1.546 / 1.529 / 1.576 / 1.745** — and the `b`-dependence is correspondingly flatter at the lower
+ductility (1.92x across the row at eps_su = 0.025 against 2.17x at 0.05).
+
+**CORRECTION, same day, when the missing `b = 0` cell landed (see 6).** This paragraph first read that
+the ratio "climbs 1.529 -> 1.576 -> 1.745", written from three points. With the fourth the shape is
+different: **1.546 / 1.529 / 1.576 are flat within scatter** (a 3% spread against the +/-6% run-to-run
+scatter D97 measured), and only `b = 0.01` at **1.745** stands clear. So the interaction is NOT a gradual
+drift with `b` — it is **concentrated in the last decade**, the same decade that carries +80% of the
+hardening effect itself. The conclusion is unchanged (the levers interact, the uncertainty stays
+two-dimensional); the mechanism reading sharpens, because whatever couples them only switches on where
+hardening starts forcing rows to share. A trend was read into three points that four do not support. **THE UNCERTAINTY THEREFORE STAYS TWO-DIMENSIONAL — there is no single composite
 parameter to quote a capacity against, and both must be declared every time one is.** Two obvious
 candidates were tested and both fail: capacity is not a function of `b*eps_su`, and not a function of the
 hardening stress gain `b*E*(eps_su - eps_y)` either — that one runs BACKWARDS (Deltasigma = 0.96 MPa
@@ -3165,11 +3174,15 @@ reaches, capacity is a LOCALIZATION quantity that they jointly determine. It als
 reading of Aydin's 1.208x as constitutive rather than parametric — our peak will not go there for any
 `b` or `eps_su`.
 
-**6. A DESIGN SLIP, recorded.** The eps_su = 0.025 row was framed as ALSO testing whether the
-"`1e-4` = `0`" floor survives at lower ductility, but it was launched with `b = 1e-4` and no `b = 0`
-partner, so that question went unanswered by construction. The missing cell is running. Cheap to fix
-here; the general point is that a sweep designed to answer two questions has to carry the control for
-both.
+**6. A DESIGN SLIP, recorded — and its answer.** The eps_su = 0.025 row was framed as ALSO testing
+whether the "`1e-4` = `0`" floor survives at lower ductility, but it was launched with `b = 1e-4` and no
+`b = 0` partner, so that question went unanswered by construction. The general point is that a sweep
+designed to answer two questions has to carry the control for both.
+
+The missing cell returned **capacity 0.308% against 1e-4's 0.311% (1.0% apart) and peak 926.4 against
+926.6 kN (0.02%)**. Against the +/-6% run-to-run scatter on capacity those are indistinguishable, so
+**the floor is a property of `b` alone and holds at both ductilities** — 0.476/0.476 at eps_su = 0.05 and
+0.308/0.311 at 0.025. The indeterminacy argument of D101 needs no qualification.
 
 **Status:** accepted. Extends D101 (hardening), D99 (cyclic enhancement — now conditional on hardening),
 D97 (the eps_su sweep was run at b = 0.01, the high corner of this grid) and D87 (peak vs capacity).
