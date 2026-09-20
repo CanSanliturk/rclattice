@@ -1,0 +1,350 @@
+<title>RW2 Wall Matrix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+  :root{
+    --ground:#F4F5F7; --surface:#FFFFFF; --sunken:#ECEEF1;
+    --ink:#15181D; --muted:#5B636E; --faint:#8A929E;
+    --line:#DCE1E7; --line-strong:#C3CAD3;
+    --accent:#9A3B24;
+    --ok:#1E6B49; --warn:#A9761A; --far:#6B7A8A;
+    --serif:"IBM Plex Serif",Georgia,serif;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1114; --surface:#171B21; --sunken:#1E242B;
+      --ink:#E7EAEE; --muted:#98A1AC; --faint:#6E7883;
+      --line:#262D35; --line-strong:#39424C;
+      --accent:#D2694B; --ok:#3E9B72; --warn:#C9932F; --far:#8B98A6;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1114; --surface:#171B21; --sunken:#1E242B;
+    --ink:#E7EAEE; --muted:#98A1AC; --faint:#6E7883;
+    --line:#262D35; --line-strong:#39424C;
+    --accent:#D2694B; --ok:#3E9B72; --warn:#C9932F; --far:#8B98A6;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--ground); color:var(--ink); font-family:var(--sans);
+       font-size:15px; line-height:1.5; -webkit-text-size-adjust:100%}
+  .wrap{max-width:640px; margin:0 auto; padding:20px 16px 56px;
+        display:flex; flex-direction:column; gap:26px}
+
+  header{display:flex; flex-direction:column; gap:8px}
+  .eyebrow{font-family:var(--mono); font-size:10.5px; letter-spacing:.11em;
+           text-transform:uppercase; color:var(--faint)}
+  h1{font-family:var(--serif); font-weight:600; font-size:27px; line-height:1.15;
+     margin:0; text-wrap:balance; letter-spacing:-.01em}
+  .sub{color:var(--muted); font-size:14px; margin:0}
+  .sub code{font-family:var(--mono); font-size:12px; color:var(--faint)}
+
+  .datum{display:flex; align-items:baseline; gap:10px; padding:13px 15px;
+         background:var(--surface); border:1px solid var(--line);
+         border-left:3px solid var(--accent); border-radius:3px}
+  .datum .v{font-family:var(--mono); font-size:21px; font-weight:600;
+            font-variant-numeric:tabular-nums; color:var(--accent)}
+  .datum .k{font-size:13px; color:var(--muted); line-height:1.35}
+
+  h2{font-family:var(--mono); font-weight:500; font-size:11px; letter-spacing:.1em;
+     text-transform:uppercase; color:var(--faint); margin:0 0 12px;
+     padding-bottom:8px; border-bottom:1px solid var(--line)}
+  section{display:block}
+
+  .grp{font-family:var(--serif); font-size:15px; font-weight:600; margin:20px 0 9px;
+       display:flex; align-items:baseline; gap:9px}
+  .grp:first-of-type{margin-top:0}
+  .grp .note{font-family:var(--sans); font-size:11.5px; font-weight:400; color:var(--faint)}
+
+  .cell{background:var(--surface); border:1px solid var(--line); border-radius:3px;
+        padding:12px 14px; display:flex; flex-direction:column; gap:9px; margin-bottom:7px}
+  .cell.gap{background:transparent; border-style:dashed; padding:9px 14px}
+  .cell.best{border-color:var(--ok); border-left:3px solid var(--ok)}
+
+  .axes{display:flex; flex-wrap:wrap; gap:5px; align-items:center}
+  .chip{font-family:var(--mono); font-size:10.5px; letter-spacing:.03em;
+        padding:2px 7px; border-radius:2px; background:var(--sunken); color:var(--muted)}
+  .chip.b{background:transparent; border:1px solid var(--line-strong)}
+  .flag{font-family:var(--mono); font-size:10px; letter-spacing:.04em; margin-left:auto;
+        color:var(--warn); text-transform:uppercase}
+
+  .nums{display:flex; align-items:baseline; gap:7px; flex-wrap:wrap}
+  .peak{font-family:var(--mono); font-size:19px; font-weight:600;
+        font-variant-numeric:tabular-nums}
+  .unit{font-family:var(--mono); font-size:11px; color:var(--faint)}
+  .ratio{font-family:var(--mono); font-size:13px; font-weight:600; margin-left:auto;
+         font-variant-numeric:tabular-nums}
+  .ratio.ok{color:var(--ok)} .ratio.warn{color:var(--warn)} .ratio.far{color:var(--far)}
+
+  .bar{position:relative; height:5px; background:var(--sunken); border-radius:3px}
+  .bar i{position:absolute; left:0; top:0; bottom:0; border-radius:3px; display:block}
+  .bar i.ok{background:var(--ok)} .bar i.warn{background:var(--warn)} .bar i.far{background:var(--far)}
+  .bar u{position:absolute; left:0; top:-3px; bottom:-3px; width:2px;
+         background:var(--accent); text-decoration:none}
+
+  .meta{display:flex; gap:12px; flex-wrap:wrap; font-family:var(--mono);
+        font-size:10.5px; color:var(--faint); font-variant-numeric:tabular-nums}
+  .gapline{font-size:12.5px; color:var(--faint)}
+  .gapline b{font-weight:600; color:var(--muted)}
+
+  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:7px}
+  .tile{background:var(--surface); border:1px solid var(--line); border-radius:3px;
+        padding:10px 8px; text-align:center}
+  .tile .n{font-family:var(--mono); font-size:19px; font-weight:600; display:block;
+           font-variant-numeric:tabular-nums}
+  .tile .l{font-family:var(--mono); font-size:9.5px; letter-spacing:.05em;
+           text-transform:uppercase; color:var(--faint)}
+
+  p.body{margin:0 0 11px; font-size:14px; color:var(--muted)}
+  p.body:last-child{margin-bottom:0}
+  p.body b{color:var(--ink); font-weight:600}
+
+  details{background:var(--surface); border:1px solid var(--line); border-radius:3px;
+          padding:11px 14px}
+  summary{cursor:pointer; font-size:13.5px; color:var(--muted)}
+  summary::marker{color:var(--faint)}
+  details ul{margin:10px 0 0; padding-left:16px; font-family:var(--mono);
+             font-size:10.5px; color:var(--faint); line-height:1.7}
+  details li{overflow-wrap:anywhere}
+
+  .charts{margin-top:2px; display:grid; grid-template-columns:1fr; gap:12px}
+  @media (min-width:560px){ .charts{grid-template-columns:1fr 1fr} }
+  .chart canvas{width:100%; height:132px; display:block}
+  #ch_cyclic,#chf_cyclic{height:200px}
+  .chart .cap{font-family:var(--mono); font-size:9.5px; letter-spacing:.04em;
+              text-transform:uppercase; color:var(--faint); margin-bottom:3px}
+  .clegend{display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;
+           font-family:var(--mono); font-size:9.5px; color:var(--faint)}
+  .clegend span{display:inline-flex; align-items:center; gap:4px}
+  .clegend b{width:13px; height:0; border-top-width:2px; border-top-style:solid; display:inline-block}
+  .clegend em{width:5px; height:5px; border-radius:50%; display:inline-block; font-style:normal}
+
+  footer{font-size:12px; color:var(--faint); line-height:1.6;
+         border-top:1px solid var(--line); padding-top:14px}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Overlapping lattice model · squat shear wall</div>
+    <h1>Parametric study, master report</h1>
+    <p class="sub">Specimen: 1220 × 3660 × 102 mm slender wall RW2, aspect ratio 3.0, 378 kN axial load, tested by <b>Thomsen &amp; Wallace (1995, 2004)</b>; every number second-hand through the 2019 paper. Lattice method and the simulation being replicated: <b>Aydin, Tuncay &amp; Binici (2019)</b>, J. Struct. Eng. 145(9).</p>
+    <p class="sub" id="sub">Loading…</p>
+  </header>
+
+  <div class="datum">
+    <span class="v">163.3</span>
+    <span class="k">kN measured peak — Thomsen &amp; Wallace RW2, as reported in Aydin et al. (2019) Table 4. Every ratio below is against this.</span>
+  </div>
+
+  <section>
+    <h2>The matrix — one row per cell per analysis</h2>
+    <div id="matrix"></div>
+  </section>
+
+  <section>
+    <h2>The tension tail — what <em>solved</em> and <em>paper</em> mean</h2>
+    <p class="body">Aydin's concrete cracks along a <b>trilinear tension tail</b>: linear to (ε<sub>cr</sub>, f<sub>t</sub>), then down through knees at a<sub>1</sub>ε<sub>cr</sub> and a<sub>2</sub>ε<sub>cr</sub>, reaching zero at a<sub>3</sub>ε<sub>cr</sub>. The shape constants a<sub>1</sub>, b<sub>1</sub>, b<sub>2</sub> are the same for every specimen in his Table 1. <b>How far the tail runs — a<sub>2</sub> and a<sub>3</sub> — is the axis.</b></p>
+    <p class="body"><b>solved</b> — a<sub>2</sub> and a<sub>3</sub> are computed per strut so it dissipates exactly G<sub>f</sub> = 75 N/m over its own length. A longer strut gets a shorter tail. That is what makes the model <b>mesh-objective</b>.</p>
+    <p class="body"><b>paper</b> — a<sub>2</sub> = 70, a<sub>3</sub> = 360, the values he prints for this specimen, fitted at <b>his</b> grid size of 20 mm. This study runs at 50 mm, and transplanting a fitted tail across grid sizes breaks the energy identity: measured, it dissipates <b>5.26 × G<sub>f</sub></b>. It buys +22.6% base shear, which is why the paper cells overshoot at 1.19 × and why the column is <b>dropped rather than pursued</b>.</p>
+    <p class="body">The axis exists only for the two laws built on his trilinear backbone. <b>crushing</b> uses Concrete02, whose tail is bilinear and regularised differently, so <b>crushing / paper cannot be built</b> — three of the gaps are permanent.</p>
+  </section>
+
+  <section>
+    <h2>Reading the bars and the charts</h2>
+    <p class="body">Bar length is the overshoot above the measured 163.3 kN; the oxide tick at the left edge is the measurement itself.</p>
+    <p class="body">Each analysis carries two panes of the same data — the <b>full run</b> to its own reach, and the <b>test range only</b>, cut where the record stops. Both use one vertical scale, so the dashed oxide line at 163.3 kN sits at a single height throughout and the panes differ only in x.</p>
+    <p class="body">The matrix is keyed on compression law × tension tail × bond, so <b>any other parameter shadows</b>: the newest run in a cell may be a mesh or damping variant standing where the baseline was. Each row therefore names what is non-default about the run actually shown — an amber chip such as <b>mesh 25</b> means you are not looking at the cell's plain baseline.</p>
+    <p class="body">Cells marked <b>start-up spike</b> peak below 0.1% drift, where a bond ring acts as a parallel load path. That force is real but it is not sustained resistance; each such row prints what it actually holds afterwards.</p>
+  </section>
+
+  <section>
+    <h2>Analyses present</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <footer>
+    Two runs answer the same question when every model- and analysis-affecting parameter matches except the axis under study.<br><br>
+    <span id="live"></span>
+  </footer>
+</div>
+
+<script id="baked" type="application/json">__PAYLOAD__</script>
+<script id="refdata" type="application/json">__REFDATA__</script>
+<script>
+(function(){
+  var REF = JSON.parse(document.getElementById("refdata").textContent);
+  var DATA = JSON.parse(document.getElementById("baked").textContent);
+  var TEST = 163.284, YMIN = -50, YMAX = 260, TEST_REACH = 1.97, CYC_REACH = [-1.97, 1.97];
+  function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
+
+  function band(r){ return r <= 1.05 ? "ok" : (r <= 1.25 ? "warn" : "far"); }
+
+  function render(){
+    var host = document.getElementById("matrix");
+    host.innerHTML = "";
+    document.getElementById("sub").innerHTML =
+      DATA.run_count + " runs. Generated " + esc(DATA.generated) +
+      ". Cells with no run are gaps, not omissions.";
+    var t = document.getElementById("tiles"); t.innerHTML = "";
+    Object.keys(DATA.counts).sort(function(a,b){ return DATA.counts[b]-DATA.counts[a]; })
+      .forEach(function(k){
+        var el = document.createElement("div"); el.className = "tile";
+        el.innerHTML = '<span class="n">' + DATA.counts[k] + '</span><span class="l">' + esc(k) + '</span>';
+        t.appendChild(el);
+      });
+
+    var groups = [];
+    DATA.rows.forEach(function(r){
+      var g = groups.filter(function(x){ return x.comp === r.comp; })[0];
+      if (!g){ g = {comp: r.comp, rows: []}; groups.push(g); }
+      g.rows.push(r);
+    });
+
+    groups.forEach(function(g){
+      var h = document.createElement("div"); h.className = "grp";
+      h.innerHTML = esc(g.comp) + ' <span class="note">' + (DATA.comp_note[g.comp] || "") + '</span>';
+      host.appendChild(h);
+
+      g.rows.forEach(function(r){
+        var chart = r.analysis === "pushover" || r.analysis === "cyclic";
+        var el = document.createElement("div");
+        el.className = "cell" + (r.best ? " best" : "");
+        var over = Math.max(0, (r.ratio - 1) / 0.9 * 100);
+        var html =
+          '<div class="axes"><span class="chip">' + esc(r.tail) + '</span>' +
+          '<span class="chip b">' + esc(r.bond === "perfect" ? "perfect bond" : r.bond) + '</span>' +
+          (r.analysis !== "pushover"
+            ? '<span class="chip" style="background:var(--accent);color:#fff">' + esc(r.analysis) + '</span>' : "") +
+          (r.n_of_kind > 1 ? '<span class="chip">' + r.n_of_kind + ' runs, newest</span>' : "") +
+          (r.variant ? '<span class="chip" style="border:1px solid var(--warn);color:var(--warn);background:transparent">'
+              + esc(r.variant) + '</span>' : "") +
+          (r.spike ? '<span class="flag">start-up spike</span>' : "") + '</div>' +
+          '<div class="nums"><span class="peak">' + r.peak_kN.toLocaleString(undefined,
+              {minimumFractionDigits:1, maximumFractionDigits:1}) + '</span>' +
+          '<span class="unit">kN</span>' +
+          '<span class="ratio ' + band(r.ratio) + '">' + r.ratio.toFixed(3) + ' ×</span></div>' +
+          '<div class="bar"><u></u><i class="' + band(r.ratio) + '" style="width:' +
+              Math.min(100, over).toFixed(1) + '%"></i></div>' +
+          '<div class="meta"><span>peak at ' + (r.at_drift * 100).toFixed(3) + '% drift</span>' +
+          '<span>' + (r.cyclic ? "reached ±" : "traced to ") + (r.reach * 100).toFixed(3) + '%</span>' +
+          (r.smoothed ? "" : '<span>raw maximum, not re-scored</span>') + '</div>' +
+          (r.sustained ? '<div class="gapline">Sustained past 0.1% drift: <b>' +
+              r.sustained[0] + ' → ' + r.sustained[1] + ' kN</b> — what it actually holds.</div>' : "");
+        if (chart){
+          var id = r.run.replace(/[^A-Za-z0-9]/g, "_");
+          html += '<div class="charts"' + (r.cyclic ? ' style="grid-template-columns:1fr"' : '') + '>' +
+            '<div class="chart"><div class="cap">full run</div><canvas id="a_' + id + '"></canvas></div>' +
+            '<div class="chart"><div class="cap">test range only</div><canvas id="b_' + id + '"></canvas>' +
+            '<div class="clegend"><span><em style="background:var(--faint)"></em>test, cyclic record</span>' +
+            '<span><b style="border-color:var(--accent)"></b>test backbone</span>' +
+            '<span><b style="border-color:var(--ink)"></b>this run</span></div></div></div>';
+        }
+        el.innerHTML = html;
+        host.appendChild(el);
+      });
+    });
+    drawAll();
+  }
+
+  function frame(g, w, h, pad, xd, yd){
+    var X = function(v){ return pad.l + ((v - xd[0]) / (xd[1] - xd[0])) * (w - pad.l - pad.r); };
+    var Y = function(v){ return h - pad.b - ((v - yd[0]) / (yd[1] - yd[0])) * (h - pad.t - pad.b); };
+    g.strokeStyle = css("--line-strong"); g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(pad.l, Math.round(Y(0)) + .5); g.lineTo(w - pad.r, Math.round(Y(0)) + .5);
+    if (xd[0] < 0){ g.moveTo(Math.round(X(0)) + .5, pad.t); g.lineTo(Math.round(X(0)) + .5, h - pad.b); }
+    else { g.moveTo(pad.l + .5, pad.t); g.lineTo(pad.l + .5, h - pad.b); }
+    g.stroke();
+    return {X: X, Y: Y};
+  }
+
+  function poly(g, sc, pts, col, lw, xd){
+    g.save(); g.strokeStyle = col; g.lineWidth = lw; g.lineJoin = "round"; g.beginPath();
+    var on = false;
+    pts.forEach(function(q){
+      if (q[0] < xd[0] || q[0] > xd[1]) return;
+      if (!on){ g.moveTo(sc.X(q[0]), sc.Y(q[1])); on = true; } else g.lineTo(sc.X(q[0]), sc.Y(q[1]));
+    });
+    g.stroke(); g.restore();
+  }
+
+  function draw(id, row, mode){
+    var cv = document.getElementById(id); if (!cv) return;
+    var cyc = row.cyclic;
+    var xd = cyc ? (mode === "full" ? [-2.05, 2.05] : [-0.90, 0.90])
+                 : [0, mode === "full" ? Math.max(row.xmax, 0.3) : TEST_REACH];
+    var yd = cyc ? [-1050, 1050] : [YMIN, YMAX];
+    var r = Math.min(window.devicePixelRatio || 1, 2);
+    var w = cv.clientWidth || 300, h = cyc ? 200 : 132;
+    cv.width = w * r; cv.height = h * r;
+    var g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+    var pad = {l: 40, r: 8, t: 8, b: 18};
+
+    if (cyc && mode !== "full"){
+      var sc0 = frame(g, w, h, pad, xd, yd);
+      g.fillStyle = css("--accent"); g.globalAlpha = .07;
+      g.fillRect(sc0.X(CYC_REACH[0]), pad.t, sc0.X(CYC_REACH[1]) - sc0.X(CYC_REACH[0]), h - pad.t - pad.b);
+      g.globalAlpha = 1;
+    }
+    var sc = frame(g, w, h, pad, xd, yd);
+
+    if (!cyc){
+      g.save(); g.setLineDash([3, 3]); g.strokeStyle = css("--accent"); g.lineWidth = 1;
+      g.beginPath(); g.moveTo(pad.l, sc.Y(TEST)); g.lineTo(w - pad.r, sc.Y(TEST)); g.stroke(); g.restore();
+    }
+
+    g.font = '9px "IBM Plex Mono", monospace'; g.fillStyle = css("--faint");
+    g.textAlign = "right"; g.textBaseline = "middle";
+    g.fillText(String(yd[1]), pad.l - 4, sc.Y(yd[1]));
+    g.fillText(cyc ? String(yd[0]) : "0", pad.l - 4, sc.Y(cyc ? yd[0] : 0));
+    g.textBaseline = "top";
+    g.textAlign = cyc ? "center" : "left";
+    g.fillText(cyc ? xd[0].toFixed(1) + "%" : "0", cyc ? sc.X(xd[0]) + 10 : pad.l, h - pad.b + 4);
+    g.textAlign = "right";
+    g.fillText(xd[1].toFixed(2).replace(/0$/, "") + "% drift", w - pad.r, h - pad.b + 4);
+
+    g.save();
+    g.beginPath(); g.rect(pad.l, pad.t, w - pad.l - pad.r, h - pad.t - pad.b); g.clip();
+    g.fillStyle = css("--faint"); g.globalAlpha = .30;
+    REF.cloud.forEach(function(q){
+      if (q[0] < xd[0] || q[0] > xd[1]) return;
+      if (!cyc && q[1] < yd[0]) return;
+      g.fillRect(sc.X(q[0]) - .6, sc.Y(q[1]) - .6, 1.2, 1.2);
+    });
+    g.globalAlpha = 1;
+    poly(g, sc, REF.env, css("--accent"), 2, xd);
+    poly(g, sc, DATA.series[row.series] || [], css("--ink"), cyc && mode === "full" ? 0.9 : 1.5, xd);
+    g.restore();
+  }
+
+  function drawAll(){
+    DATA.rows.forEach(function(r){
+      if (r.analysis !== "pushover" && r.analysis !== "cyclic") return;
+      var id = r.run.replace(/[^A-Za-z0-9]/g, "_");
+      draw("a_" + id, r, "full"); draw("b_" + id, r, "focus");
+    });
+  }
+
+  render();
+  window.addEventListener("resize", drawAll);
+  if (window.matchMedia){
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(drawAll);
+  }
+  try { new MutationObserver(drawAll).observe(document.documentElement,
+        {attributes:true, attributeFilter:["data-theme"]}); } catch (e) {}
+
+  // NO LIVE STORE. The `db` capability cannot be granted to a publicly shared artifact, and this
+  // report is shared with the user's advisor, so the page carries its data and is republished when
+  // the study advances. `report_page.py` rebuilds it from the run directories.
+  document.getElementById("live").textContent =
+    "Data as of " + DATA.generated + ". Rebuilt from the run directories and republished when the "
+    + "study advances — this page carries its own copy rather than fetching one.";
+
+})();
+</script>

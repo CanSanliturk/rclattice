@@ -69,6 +69,7 @@ def build_lattice_rc(
     rebar_material: "Callable[[object, int], UniaxialMaterial]" = steel_uniaxial,
     grid: "tuple[np.ndarray, list] | None" = None,
     pairs: "list[tuple[int, int]] | None" = None,
+    strut_area_of_pair: "Callable[[int, int, float], float] | None" = None,
     bond_material: "Callable[[str, float], UniaxialMaterial] | None" = None,
     bond_area: "float | Callable[[float], float] | None" = None,
     bond_horizon: "float | None" = None,
@@ -102,6 +103,11 @@ def build_lattice_rc(
     from the regular grid. Re-running `connect_horizon` on moved nodes silently drops the struts
     whose length happens to cross `horizon*mesh_size` (5 of 420 at Rmax/d = 0.08), which would make
     the lattice's connectivity a random variable on top of its geometry.
+
+    `strut_area_of_pair(i, j, length)` overrides `strut_area` per concrete strut, indexed by the
+    node pair — for a GRADED grid (D104, `mesh.mesh_rectangle_lines`) whose struts need areas
+    scaled to their local tributary width (`mesh.tributary_area_scale`). A length-only rule cannot
+    express that, since a horizontal strut's width is the VERTICAL spacing beside it.
 
     BOND (D72, optional — default OFF, i.e. perfect bond as before).
 
@@ -171,7 +177,9 @@ def build_lattice_rc(
             model.uniaxial_materials.append(mat)
             mat_cache[key] = tag
             tag += 1
-        model.add_element(eid, strut_element, (i + 1, j + 1), (area_fn(length), mat_cache[key]))
+        a_strut = (strut_area_of_pair(i, j, length) if strut_area_of_pair is not None
+                   else area_fn(length))
+        model.add_element(eid, strut_element, (i + 1, j + 1), (a_strut, mat_cache[key]))
         eid += 1
 
     steel_tag: dict[int, int] = {}  # id(SteelGrade) -> material tag (one material per grade)
@@ -294,8 +302,12 @@ def build_continuum_rc(
     plane: str = "PlaneStress",
     rebar_tol: float = 1e-6,
     rebar_material: "Callable[[object, int], UniaxialMaterial]" = steel_uniaxial,
+    grid: "tuple[np.ndarray, list] | None" = None,
 ) -> tuple[Model, EdgeNodes]:
     """RC continuum builder (D29): per-zone nonlinear nD-concrete quads + steel rebar struts.
+
+    `grid` overrides the generated `(coords, quads)`, so a continuum twin can share a GRADED grid
+    with its lattice (D104) exactly as it shares the uniform one.
 
     The continuum verification reference that matches the RC lattice (D12/D14): the SAME structured
     node grid, plane-stress `quad` elements with a nonlinear nD concrete (ASDConcrete3D + PlaneStress
@@ -310,7 +322,7 @@ def build_continuum_rc(
     `Rebar` becomes steel struts on its on-path nodes via `rebar_material` (one material per grade).
     Same grid / mass / supports / loads plumbing as the other builders.
     """
-    coords, quads = _grid(problem, mesh_size)
+    coords, quads = _grid(problem, mesh_size) if grid is None else grid
     model = Model(ndm=2, ndf=2)
     thickness = problem.domain.thickness
 

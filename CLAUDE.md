@@ -188,6 +188,10 @@ level above it (D11).
                                   #   START AT replica/../HANDOFF.md — see D72-D75. THICKNESS 120->210
                                   #   (D73); replica/ holds a reconstruction of AYDIN'S OWN model,
                                   #   which is how the error was measured
+      thomsen_wallace_wall/       # "RW2" — Thomsen & Wallace (1995, 2004) slender wall, aspect 3.0, N = 378 kN,
+                                  #   second-hand through Aydin (2019) Fig. 9 (D105). specimen/testdata/build/
+                                  #   summary/draw/preflight/digitize + study/ on the shared harness (D103);
+                                  #   TWO grid modes, uniform and rebar-aligned graded (D104)
       vk3_wall/                   # "VK3" — squat wall-type BRIDGE PIER (Bimschas 2010, IBK
                                   #   Bericht 326, ETH Zurich, Ch. 5). The first SHEAR-relevant
                                   #   specimen: Lv/lw = 2.20 but rho_sw = 0.08%, shear 20-22% of
@@ -800,6 +804,29 @@ the thin-nonlinear-beam lattice instability, D34).
   as thin wrappers (`study/study_spec.py`), verified identical on four regressions over its 45 runs.
   `rclattice/study/registry.py` carries factories for the parameters every study shares; a
   specimen's digitizer writes the `.npz` keys `references.py` documents.
+
+- REBAR-ALIGNED GRADED GRID (D104, `mesh.mesh_rectangle_lines` / `graded_lines` /
+  `connect_index_horizon` / `tributary_area_scale`): bar axes become grid lines, gaps fill at the
+  target spacing, connectivity is the horizon rule in INDEX space, and each strut's area is the
+  uniform-patch `A_t` scaled by its tributary width (orthogonal: mean perpendicular spacing;
+  diagonal: √(dx·dy)). `build_lattice_rc(strut_area_of_pair=)` and `build_continuum_rc(grid=)`
+  carry it; nothing default changed. On RW2 the graded grid reads the same-grid continuum at 0.951
+  against 0.941 for the uniform grid, with every bar on its axis.
+
+- THOMSEN & WALLACE RW2 (D105, `examples/thomsen_wallace_wall/`): 1220 x 3660 x 102, aspect 3.0,
+  N = 378 kN, boundary elements 8-#3 + 4.76 mm hoops @ 76, web #2 @ 191 both ways — EVERY NUMBER
+  SECOND-HAND from Aydin et al. (2019) Fig. 9 / Tables 1-4 (the primary sources are not in the
+  repo; `testdata.py` lists what the 2019 paper does not print: levels, coupons, hardening, rupture,
+  failure mode). Runs through the shared harness (`study/`, registry composed from the shared
+  factories + `grid`/`field`/`nu`/`fy` axes; default graded 25 mm, crushing/solved/perfect, drift
+  2.5%). Fig. 9(b) digitized to 1.003x Table 4's peak; the record is unclipped. STAGE 0:
+  K_lattice/K_continuum = **0.951** (uniform 30.5: 0.941; equibiaxial field: 0.821) — the D53
+  flexural under-read (bending is a uniaxial-STRESS state and the lattice's ν_eff = 0.41 costs it),
+  recorded as a property of the method, not fitted. **Table 4's K = 35.19 kN/mm is 1.18x the
+  uncracked transformed section** (29.9), so K/K_measured is not a calibration verdict (cf. D73).
+  V_flex at nominal f_y with no hardening = 0.82x the measured peak: unlike Aldemir, PEAK here is a
+  flexural-yield quantity, so hardening/coupon strength will bind. Preflight: 26.8 h to 2.5% on the
+  graded grid (0.293 h/mm, 46 steps/s). Run sheets: `doc/reports/thomsen_wallace_runs/`.
 
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its

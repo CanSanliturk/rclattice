@@ -3234,3 +3234,104 @@ clock; (4) all 38 generated run-sheet `.tex` files identical. Tests: 55 pass, 1 
 the shared comparison and run-sheet code reads those keys.
 
 **Status:** accepted. Supersedes nothing; D83–D102 stand and their runs are read unchanged.
+
+### D104 — 2026-09-20 — A rebar-aligned GRADED grid as a second meshing option: bar axes become grid lines, the gaps are filled at the target spacing, connectivity is the horizon rule in index space, and strut areas scale with their tributary width
+
+**Context.** Every study so far placed bars by SNAPPING them to a uniform grid (Aldemir's horizontal
+cage sat 25 mm low at mesh 50). RW2's layout — boundary bars at 19, 70, 121, 172 mm, web bars at
+323.5 + n·191, hoops at 38 + n·76 — has no usable common divisor with 1220 and 3660, so a uniform
+grid moves bars by up to 15 mm at mesh 30.5 (8% of the boundary-element width) and cannot put the
+four boundary bars on distinct lines at any spacing coarser than 12.2. The user asked (2026-09-20)
+for both options as a CLI choice: the uniform grid as before, and one that has nodes on the bar
+axes regardless and fills the rest from a mesh size.
+
+**Decision.** `mesh.mesh_rectangle_lines(length, height, mesh, x_lines=, y_lines=)` meshes a
+rectangle on `graded_lines`: the hard lines (bar axes and the boundary) plus each gap split into
+`max(1, round(gap/mesh))` EQUAL parts. gmsh stays the single node source (D6/D10): the boundary is
+split at the hard coordinates, every piece is transfinite one cell long, and one transfinite surface
+with its four corners named yields the tensor grid; nodes are snapped to the exact lines afterwards
+so bar paths match at the reinforcement tolerance. Two consequences the uniform grid never had:
+
+1. **Connectivity is the horizon rule in INDEX space** (`connect_index_horizon`): (i, j) to
+   (i+di, j+dj) whenever di²+dj² ≤ h². On a uniform grid this is exactly `connect_horizon` (tested
+   at 1.5 and 3.01). On a graded grid the METRIC rule would wire a short interval's nodes to their
+   second neighbours and skip a long interval's diagonals, making topology a function of grading.
+2. **Strut area scales with tributary width** (`tributary_area_scale`): the balance is struck on a
+   uniform patch at the target mesh and gives one `A_t`; on the graded grid an orthogonal strut
+   takes `A_t · d_perp/d` (mean perpendicular spacing beside it) and a diagonal `A_t · √(dx dy)/d`
+   (its cell's isotropic scale). Aydin's closed form `E_tA_t = C E_t d w` is linear in `d`, and a
+   strut's `EA/L` stands in for a continuum strip whose WIDTH is the perpendicular spacing — a
+   length-only rule (`strut_area(L)`) cannot express that, so `build_lattice_rc` gained
+   `strut_area_of_pair(i, j, L)` and `build_continuum_rc` gained `grid=` so the continuum twin
+   shares the graded grid. Under uniform rescaling both rules reduce to the scale factor (tested).
+
+**Measured on RW2 (25 mm target: spacings 19.0–25.5 mm, scale factors 0.76–1.02).** Lattice over
+same-grid continuum: **0.9511 graded vs 0.9406 uniform at 30.5** — the graded grid is no worse than
+the uniform one and puts every bar on its axis (offsets 0.0 mm for bars and hoops; the 191-pitch
+horizontal web bars snap by ≤ 12.5 mm to the hoop-based y-lines, by design). Cost: 7,446 nodes /
+32,423 elements against 4,961 / 22,002 at uniform 30.5, and the explicit step is set by the
+SHORTEST spacing (19 mm), so the graded grid is ~2.4x dearer per mm of drive.
+
+**Blast radius.** Additive: new functions in `mesh.py`, two optional keyword arguments on the
+builders, no default changed. `tests/test_graded_grid.py` covers the uniform equivalence, exact
+hard lines and the scaling. No existing study touches any of it.
+
+**Status:** accepted.
+
+### D105 — 2026-09-20 — Thomsen & Wallace RW2 stood up through the shared harness, every number second-hand from Aydin (2019); Stage 0 gives K_lattice/K_continuum = 0.951, the D53 flexural under-read, and Table 4's "initial stiffness" exceeds the uncracked section
+
+**The specimen** (`examples/thomsen_wallace_wall/`): the slender rectangular wall of Thomsen &
+Wallace (1995 Clarkson report; 2004 JSE 130(4)), as Fig. 9 / Tables 1, 2, 4 of Aydin, Tuncay &
+Binici (2019) report it. 1220 × 3660 × 102 (48 × 144 × 4 in), aspect ratio 3.0, constant axial
+load 378 kN = 0.071 A_g f_c, 8-#3 per boundary element at 3@51 from a 19 cover with 4.76 mm hoops
+at 76, 8-#2 vertical web bars, #2 @ 191 horizontal; f_c 42.8, f_t 2.03 (no footnote; = 0.31√f_c),
+E_c 31,030 (no footnote), G_f 75 N/m, f_y 414 (the NOMINAL 60 ksi). Measured (Table 4): K 35.19
+kN/mm, F 163.284 kN; Aydin's own lattice at 19 mm / horizon 1.5: 32.26 kN/mm, 169.834 kN (1.040x —
+his BEST specimen on force, against 1.21x on Aldemir). **Neither primary source is in the repo**
+(user decision 2026-09-20: build from the 2019 paper); `testdata.py` lists what it does not print
+— the loading levels, the coupon strengths, hardening, rupture strain, the failure mode. Two
+inferences are marked as such in `specimen.py`: the web bars at 191 centred between the boundary
+elements (the drawn chain sums to 917 of 1220), and the start heights of the hoops and horizontal
+bars (half a pitch).
+
+**Fig. 9(b) digitized** (`digitize.py`, the Aldemir method): gridline calibration reproduces the
+two published simulated plateaus to 0.994 / 1.018 and the cloud envelope peaks at +163.8 / −162.2 kN
+= **1.003x Table 4**. Unlike Fig. 10(b) the record is NOT clipped (loops reach ±72 mm inside ±80),
+so the envelope is the whole outline; the legend occludes the unloading side of the positive loops
+only. The plotted "experiment" marker sits at +70.9 mm / ~144 kN — the test's LAST point, which
+validates the displacement axis (0.985 of Table 2's 72 mm), not the peak. A physical clip at 1.1x
+the published maximum removes the halves of the "±200" labels the frame margin leaves.
+
+**Stage 0 (elastic gates).** K_lattice / K_continuum on the same graded grid = **0.9511** (0.9406
+uniform 30.5), against Aldemir's 0.9988. This is D53 arriving on a flexural wall: the uniaxial-field
+balance pins the confined modulus E/(1−ν²) while bending is a uniaxial-STRESS state in which the
+lattice reads C11(1−ν_eff²) with its own ν_eff = 0.41 — on plain concrete the ratio is 0.940
+against the (1−ν_eff²)/(1−ν²) = 0.870 estimate, the rebar and shear share making up the rest. The
+published equibiaxial route is worse here too (**0.821**), so `field="uniaxial"` stays and the 5%
+is recorded as a property of the method, not fitted away. Against beam theory: lattice /
+transformed-section cantilever 0.988 (shear 8% of the flexibility). **Table 4's K = 35.19 kN/mm is
+1.18x the uncracked transformed section (29.9)** — an impossibility for a top-displacement secant
+of the printed geometry, the same kind of anomaly that exposed Aldemir's thickness (D73); Aydin's
+own K_sim = 32.26 also sits above the section, consistent with his equibiaxial-at-ν=1/3 EA being
+1.17x ours (D72), so his 0.917 is two overshoots partly cancelling. K/K_measured (0.84) is therefore
+NOT a calibration verdict; the primary source would settle the definition.
+
+**Flexural check.** With nominal f_y, no hardening and N included, V_flex = 134 kN = 0.82x the
+measured peak. Unlike Aldemir, where peak was a tension-cracking quantity that no steel parameter
+reached (D87/D102), RW2's peak is a FLEXURAL-YIELD quantity: the model will need hardening (b) or
+the unprinted coupon strengths to reach 163 kN, and the 2019 paper's own "overestimation in the
+postyielding region" is where D101 lands. Expect the baseline (b = 0.01, f_y = 414) to land below
+the test; that is the prediction on record before the run.
+
+**Cost (preflight, graded 25 mm, explicit, D74 sizing).** T1 = 19.7 ms, dt_crit 3.38 µs, dt 2.70
+µs, 46 steps/s: **26.8 h to 2.5% drift (4.46 M steps), 0.293 h/mm** — a lower bound. Strut life
+45.3 / 32.4 (finer grid, longer life), so no `--gf-factor` needed.
+
+**Study configuration.** `study/params.py` composes the registry from the shared factories plus
+`comp`/`tail`/`bond` (D94 names, no legacy spellings), `grid` (uniform | rebar), `field`, `nu`,
+`fy`; defaults: graded 25 mm, crushing/solved/perfect, drift 2.5% (user, 2026-09-20), damping 0.5,
+rate 7.6. Cyclic presets are invented in shape (the paper prints no levels; the cloud shows ~8
+amplitudes to ~72 mm) and every report says so. Run sheets: `doc/reports/thomsen_wallace_runs/`.
+
+**Status:** accepted. Stage 0 passed as a MEASUREMENT (the ratio is recorded, not gated at 1.00);
+Stage 1 is the 2.5% pushover on the baseline cell, launched on both grids.

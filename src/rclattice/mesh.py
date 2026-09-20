@@ -9,6 +9,8 @@ Backend-agnostic w.r.t. OpenSees — this module never imports openseespy.
 
 from __future__ import annotations
 
+import math
+
 import gmsh
 import numpy as np
 
@@ -258,4 +260,169 @@ def perturb_nodes(
     # lengthen the specimen. Rmax is a few per cent of the spacing, so this almost never bites.
     np.clip(out[:, 0], xlo, xhi, out=out[:, 0])
     np.clip(out[:, 1], ylo, yhi, out=out[:, 1])
+    return out
+
+
+# --- rebar-aligned (graded) grids, D104 ---------------------------------------------------------
+#
+# The uniform grid forces every bar axis onto a multiple of the mesh, which the Thomsen & Wallace
+# RW2 layout (bars at 19, 70, 121, 172 mm; web bars at 323.5 + n*191) cannot satisfy at any usable
+# spacing. The alternative is a STRUCTURED grid whose lines are the union of the bar axes and a
+# regular fill: every interval between consecutive hard lines is split into `round(interval/mesh)`
+# equal parts, so bars sit on nodes exactly and the spacing stays close to the target everywhere.
+# gmsh remains the single node source (D6/D10): the boundary is split at the hard coordinates, each
+# piece is transfinite with its own count, and one transfinite surface with the four corners named
+# yields the tensor grid.
+
+
+def graded_lines(extent: float, mesh_size: float, hard: "tuple[float, ...] | list[float]" = (),
+                 *, origin: float = 0.0, tol: float = 1e-9) -> list[float]:
+    """Grid-line coordinates across `extent`: the hard lines, each gap filled at ~`mesh_size`.
+
+    Every interval between consecutive hard lines (the two ends included) is divided into
+    `max(1, round(interval / mesh_size))` EQUAL parts, so the local spacing is the closest possible
+    to the target while every hard line is honoured exactly. Duplicates and lines outside the
+    extent are dropped.
+    """
+    pts = sorted({origin, origin + extent, *(float(h) for h in hard
+                                              if -tol <= float(h) - origin <= extent + tol)})
+    out = [pts[0]]
+    for a, b in zip(pts, pts[1:]):
+        n = max(1, int(round((b - a) / mesh_size)))
+        out += [a + (b - a) * k / n for k in range(1, n + 1)]
+    return out
+
+
+def mesh_rectangle_lines(
+    length: float,
+    height: float,
+    mesh_size: float,
+    *,
+    x_lines: "tuple[float, ...] | list[float]" = (),
+    y_lines: "tuple[float, ...] | list[float]" = (),
+    origin: tuple[float, float] = (0.0, 0.0),
+    decimals: int = 9,
+) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
+    """Structured gmsh mesh of a rectangle on the graded lines of `graded_lines` in x and y.
+
+    Same return contract as `mesh_rectangle_grid`: `(coords, quads)`, quads CCW into `coords`.
+    With no hard lines and an `extent` that `mesh_size` divides it reproduces the uniform grid.
+    """
+    ox, oy = origin
+    xs = graded_lines(length, mesh_size, x_lines, origin=ox)
+    ys = graded_lines(height, mesh_size, y_lines, origin=oy)
+
+    gmsh.initialize()
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("graded")
+        g = gmsh.model.geo
+        # boundary points, counter-clockwise from the origin corner
+        bottom = [g.addPoint(x, ys[0], 0.0) for x in xs]
+        right = [bottom[-1]] + [g.addPoint(xs[-1], y, 0.0) for y in ys[1:]]
+        top = [right[-1]] + [g.addPoint(x, ys[-1], 0.0) for x in xs[-2::-1]]
+        left = [top[-1]] + [g.addPoint(xs[0], y, 0.0) for y in ys[-2:0:-1]] + [bottom[0]]
+        loop_pts = bottom + right[1:] + top[1:] + left[1:-1]
+        lines = []
+        for a, b in zip(loop_pts, loop_pts[1:] + loop_pts[:1]):
+            ln = g.addLine(a, b)
+            g.mesh.setTransfiniteCurve(ln, 2)        # every boundary piece is ONE cell long
+            lines.append(ln)
+        loop = g.addCurveLoop(lines)
+        surf = g.addPlaneSurface([loop])
+        g.mesh.setTransfiniteSurface(surf, cornerTags=[bottom[0], bottom[-1], top[0], left[0]])
+        g.mesh.setRecombine(2, surf)
+        g.synchronize()
+        gmsh.model.mesh.generate(2)
+
+        node_tags, coord_flat, _ = gmsh.model.mesh.getNodes()
+        coords = np.round(np.array(coord_flat, dtype=float).reshape(-1, 3)[:, :2], decimals)
+        tag2idx = {int(t): i for i, t in enumerate(node_tags)}
+        etypes, _etags, enodes = gmsh.model.mesh.getElements(2, surf)
+        quads: list[tuple[int, int, int, int]] = []
+        for et, en in zip(etypes, enodes):
+            if et == _GMSH_QUAD4:
+                for row in np.array(en, dtype=int).reshape(-1, 4):
+                    quads.append(_ensure_ccw(coords, tuple(tag2idx[int(t)] for t in row)))
+    finally:
+        gmsh.finalize()
+
+    # Transfinite interpolation on a rectangle with straight sides puts every interior node on the
+    # tensor grid, but float noise can leave it a few 1e-12 off; snap to the exact lines so a bar
+    # path at a hard coordinate matches its nodes at the reinforcement tolerance.
+    xs_a, ys_a = np.asarray(xs), np.asarray(ys)
+    coords[:, 0] = xs_a[np.abs(coords[:, 0][:, None] - xs_a[None, :]).argmin(axis=1)]
+    coords[:, 1] = ys_a[np.abs(coords[:, 1][:, None] - ys_a[None, :]).argmin(axis=1)]
+    return coords, quads
+
+
+def grid_indices(coords: np.ndarray, *, tol: float = 1e-6) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """`(ix, iy, xs, ys)`: each node's column/row index on the structured lines it sits on."""
+    xs = np.unique(np.round(coords[:, 0] / tol)) * tol
+    ys = np.unique(np.round(coords[:, 1] / tol)) * tol
+    ix = np.abs(coords[:, 0][:, None] - xs[None, :]).argmin(axis=1)
+    iy = np.abs(coords[:, 1][:, None] - ys[None, :]).argmin(axis=1)
+    return ix, iy, xs, ys
+
+
+def connect_index_horizon(coords: np.ndarray, horizon: float = 1.5) -> list[tuple[int, int]]:
+    """The horizon rule in INDEX space: connect (i, j) to (i+di, j+dj) whenever di^2+dj^2 <= h^2.
+
+    On a uniform grid this is exactly `connect_horizon` (D9): at 1.5 the orthogonal and diagonal
+    neighbours, at 3.01 the next rings too. On a GRADED grid the physical rule would wire a short
+    interval's nodes to their second neighbours and skip a long interval's diagonals, making the
+    topology a function of the grading; the index rule keeps it the regular-grid topology. Returns
+    (i, j) pairs with i < j, one element per pair.
+    """
+    ix, iy, xs, ys = grid_indices(coords)
+    lookup = {(int(a), int(b)): k for k, (a, b) in enumerate(zip(ix, iy))}
+    r = int(math.floor(horizon))
+    offsets = [(di, dj) for di in range(-r, r + 1) for dj in range(0, r + 1)
+               if (di, dj) != (0, 0) and (dj > 0 or di > 0) and di * di + dj * dj <= horizon * horizon + 1e-9]
+    pairs: list[tuple[int, int]] = []
+    for k, (a, b) in enumerate(zip(ix, iy)):
+        for di, dj in offsets:
+            m = lookup.get((int(a) + di, int(b) + dj))
+            if m is not None:
+                pairs.append((min(k, m), max(k, m)))
+    return sorted(set(pairs))
+
+
+def tributary_area_scale(coords: np.ndarray, pairs, mesh_size: float) -> np.ndarray:
+    """Per-strut factor turning a uniform-grid area into the area a GRADED grid needs.
+
+    The energy balance returns `A_t` for a grid of spacing `d`, and Aydin's closed form makes the
+    dependence explicit: `E_t A_t = C E_t d w`, i.e. a strut's area is proportional to the grid
+    spacing it represents. A strut's axial stiffness `EA/L` stands in for a strip of the continuum
+    whose WIDTH is the perpendicular spacing and whose length is the strut's own, so on a graded
+    grid an orthogonal strut takes `A_t * d_perp / d` with `d_perp` the mean spacing of the
+    neighbouring lines in the perpendicular direction, and a diagonal takes
+    `A_t * sqrt(dx dy) / d`, the isotropic scale of the cell it spans. Under a uniform rescaling
+    of the whole grid both reduce to the scale factor, as they must; on a mildly graded grid they
+    keep `EA/L` locally matched to the continuum, which the elastic gate then verifies.
+    """
+    ix, iy, xs, ys = grid_indices(coords)
+    dx = np.diff(xs)
+    dy = np.diff(ys)
+
+    def spacing_at(lines_d, i, i2):
+        """Mean line spacing over the index span [i, i2] (perpendicular width of a strut)."""
+        lo, hi = min(i, i2), max(i, i2)
+        # spacing "owned" by a node is the mean of the intervals either side of it
+        left = lines_d[max(lo - 1, 0)] if lo > 0 else lines_d[0]
+        right = lines_d[min(hi, len(lines_d) - 1)] if hi < len(lines_d) else lines_d[-1]
+        return 0.5 * (left + right)
+
+    out = np.empty(len(pairs))
+    for k, (i, j) in enumerate(pairs):
+        di, dj = int(ix[j]) - int(ix[i]), int(iy[j]) - int(iy[i])
+        if dj == 0:                                   # horizontal: width is the y-spacing
+            d_eff = spacing_at(dy, iy[i], iy[i])
+        elif di == 0:                                 # vertical: width is the x-spacing
+            d_eff = spacing_at(dx, ix[i], ix[i])
+        else:                                         # inclined: the cell's isotropic scale
+            cx = abs(xs[ix[j]] - xs[ix[i]]) / abs(di)
+            cy = abs(ys[iy[j]] - ys[iy[i]]) / abs(dj)
+            d_eff = math.sqrt(cx * cy)
+        out[k] = d_eff / mesh_size
     return out
