@@ -38,61 +38,6 @@ PRESETS: dict[str, tuple[float, ...]] = {
 LADDER = (0.05, 0.10, 0.15, 0.20, 0.30, 0.50, 0.75, 1.00)
 
 
-def levels(spec: str, *, target_drift: float | None = None) -> tuple[float, ...]:
-    """Resolve `--proto` to drift amplitudes. THREE FORMS, in the plan's own order (§6, §7):
-
-      * a NAMED PRESET      `--proto to0p5`
-      * a SCALED LADDER     `--proto ladder --drift 0.012`  — the eight-level shape, any target
-      * AN EXPLICIT LIST    `--proto 0.0005,0.001,0.002`    — "any level list" (§7)
-
-    The scaled ladder is what makes the cyclic target a parameter rather than a fixed 4 mm.
-    """
-    spec = str(spec).strip()
-    if spec in PRESETS:
-        return PRESETS[spec]
-    if spec == "ladder":
-        if not target_drift:
-            raise SystemExit("--proto ladder needs a target: pass --drift (e.g. --drift 0.01)")
-        return tuple(f * float(target_drift) for f in LADDER)
-    if "," in spec or spec.replace(".", "").replace("e", "").replace("-", "").isdigit():
-        try:
-            got = tuple(float(v) for v in spec.split(",") if v.strip())
-        except ValueError:
-            raise SystemExit(f"could not read {spec!r} as a list of drift amplitudes")
-        if not got:
-            raise SystemExit(f"empty level list {spec!r}")
-        return got
-    raise SystemExit(f"unknown protocol {spec!r}; use a preset {sorted(PRESETS)}, "
-                     f"'ladder' with --drift, or a comma-separated list of drifts")
-
-
-def history(name: str, *, height: float, target_drift: float | None = None,
-            cycles_per_level: int = 1) -> list[float]:
-    """The drive history in mm: 0 -> +a -> -a -> 0 per cycle, per level, in order.
-
-    Amplitudes are DRIFTS scaled by this panel's own height, because the drift denominator moves
-    with the panel (PLAN §2).
-    """
-    out: list[float] = []
-    for lvl in levels(name, target_drift=target_drift):
-        a = lvl * height
-        for _ in range(max(1, int(cycles_per_level))):
-            out += [+a, -a, 0.0]
-    return out
-
-
-def drive_path_mm(name: str, *, height: float, target_drift: float | None = None,
-                  cycles_per_level: int = 1) -> float:
-    """Total distance the actuator travels — what the run time is proportional to."""
-    hist = history(name, height=height, target_drift=target_drift,
-                   cycles_per_level=cycles_per_level)
-    cur, total = 0.0, 0.0
-    for goal in hist:
-        total += abs(goal - cur)
-        cur = goal
-    return total
-
-
 # Hours per mm of drive path. NOBOND is MEASURED (111,017 steps / 750 s over a 6.75 mm path at
 # mesh 50, 2026-09-05). BONDED is provisional and revised UP from the plan's original 0.110: the
 # step COUNT is exact (248,088 for the same path — bond links sit on light steel nodes, which drops
@@ -109,8 +54,14 @@ H_PER_MM = {"perfect": 0.0284, "bond": 0.227,
             "nobond": 0.0284}      # pre-D94 spelling of "perfect"
 
 
-def cost_hours(name: str, *, height: float, bond: bool, target_drift: float | None = None,
-               cycles_per_level: int = 1) -> float:
-    """Estimated wall-clock hours for a protocol — see `H_PER_MM` for what is measured."""
-    return drive_path_mm(name, height=height, target_drift=target_drift,
-                         cycles_per_level=cycles_per_level) * H_PER_MM["bond" if bond else "perfect"]
+
+# LIFTED (D103): the resolution of `--proto`, the drive history and the cost live in
+# `rclattice.study.protocols.ProtocolSet`; this module keeps the Aldemir presets and the MEASURED
+# cost, and delegates the functions so older callers still work.
+from rclattice.study.protocols import ProtocolSet   # noqa: E402
+
+SET = ProtocolSet(presets=PRESETS, h_per_mm=H_PER_MM, ladder=LADDER, invented=True)
+levels = SET.levels
+history = SET.history
+drive_path_mm = SET.drive_path_mm
+cost_hours = SET.cost_hours

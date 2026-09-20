@@ -3187,3 +3187,50 @@ The missing cell returned **capacity 0.308% against 1e-4's 0.311% (1.0% apart) a
 **Status:** accepted. Extends D101 (hardening), D99 (cyclic enhancement — now conditional on hardening),
 D97 (the eps_su sweep was run at b = 0.01, the high corner of this grid) and D87 (peak vs capacity).
 SW-NC-FF and WSH3 both carry `b = 0.01`. Tests 55 pass, 1 known D34 failure.
+
+### D103 — 2026-09-20 — The Aldemir study harness is lifted into a shared package, `rclattice/study/`, that a specimen CONFIGURES through a `StudySpec`; the Aldemir study runs through it unchanged, verified on four regressions
+
+**Context.** The parametric-study harness of D83–D102 (`examples/aydin_aldemir_wall/study/`: the
+parameter registry, `run.py`, metrics, rescoring, the master matrix, the advisor page, and the
+LaTeX run-sheet generator under `doc/reports/aydin_aldemir_runs/`) was 2,266 lines bound to one
+specimen in exactly three places — `models.py` imported `specimen`, `carrier_probe.py` did too, and
+the output root plus every measured number (963.592 kN, 1,038.44 kN/mm, the Table 4 pairs, the
+Fig. 10(b) clip at +16 mm, the "invented protocol" wording, the licence text, the run-sheet
+vocabulary) was a literal inside the reporting modules. A second specimen (Thomsen & Wallace RW2,
+D105) would have meant copying all of it.
+
+**Decision.** `rclattice/study/` now holds the harness — `registry.py` (`Param`, `Registry` with
+`add_arguments`/`resolve`/`run_name`/`comparable_key`/`describe`/`normalize`/`fill_defaults`, plus
+factories for the parameters every specimen shares), `spec.py` (the `StudySpec` contract:
+registry, `build(params)`, node `Selectors`, a `ReferenceSet`, a `ProtocolSet`, drift denominator,
+matrix axes, and the reporting text), `runner.py`, `metrics.py`, `protocols.py`, `references.py`,
+`report.py`, `master.py`, `rescore.py`, `page.py`, `runsheet.py`. It imports no specimen and no
+openseespy (the runners still come from `rclattice.opensees`).
+
+What was specimen-bound and now lives on the Aldemir `StudySpec` (`study/study_spec.py`): the
+`ALDEMIR_TW` environment hook (`prepare`), the panel/drift-denominator functions, the continuum twin
+for the Stage 2 gate, `report_calibration`, the load-path probe, `element_modulus` for D74's step
+sizing, the damage-figure thresholds per compression law, the `.npz` path and every Table 4 number,
+the Fig. 10(b) clip and legend note, the protocol presets and the measured `H_PER_MM`, the
+"protocol is invented" text, `SOURCES`, the licence builder, the calibration-field note, the matrix
+paragraph, and the run-sheet vocabulary (axis descriptions, title fragments, record labels,
+captions, section titles, sort key). Everything else was harness. The Aldemir modules became thin
+wrappers that keep their old module-level API (`params.REGISTRY`, `metrics.headline_peak`,
+`references.load`, `protocols.cost_hours`, `report.write`, `master.runs`/`variant_note`), so the
+stage shell scripts and `carrier_probe.py` are untouched.
+
+Kept exactly, per the handoff: the registry mechanism, the run-directory contract
+(`<stamp>_<analysis>_<comp>-<tail>_<bond>[_codes]_d<pct>`), the schema-version rule, legacy-value
+mapping (D94), `filled_defaults` reporting, and `variant_note` (D92/D98).
+
+**Regression, before and after the lift, on the same 45 runs.** (1) `master_report.md` byte-identical;
+(2) `report_payload.json` identical apart from its timestamp; (3) an elastic gate run and a 0.02%
+explicit smoke pushover made on the old harness and repeated on the new one: `params.json`
+identical, every `data.json` series identical, `report.md` identical up to the run name and wall
+clock; (4) all 38 generated run-sheet `.tex` files identical. Tests: 55 pass, 1 known D34 failure.
+
+**The `.npz` contract** a specimen's digitizer must write is now stated in `references.py`
+(`cloud`, `mono_x`/`mono_y`, `backbone`, and `<key>_x`/`<key>_y` per author-curve horizon), since
+the shared comparison and run-sheet code reads those keys.
+
+**Status:** accepted. Supersedes nothing; D83–D102 stand and their runs are read unchanged.

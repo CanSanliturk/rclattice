@@ -12,10 +12,13 @@ fragments the matrix.
 """
 from __future__ import annotations
 
-import argparse
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable
+from typing import Any
+
+from rclattice.study.registry import Param, Registry
+
+# LIFTED (D103): `Param` and every derived function now live in `rclattice.study.registry`; this
+# module keeps the Aldemir records VERBATIM and re-exports the module-level API the rest of the
+# study (and `doc/reports/aydin_aldemir_runs/generate.py`) was written against.
 
 # Bumped whenever a parameter is added, removed or changes meaning. Runs made before a parameter
 # existed stay readable: the master report fills its default and says so.
@@ -30,24 +33,6 @@ from typing import Any, Callable
 # raises a yielded bar 27% by eps_su = 0.05 and is therefore a candidate for the flat cyclic
 # envelope of D99. Default reproduces every earlier run exactly.
 SCHEMA_VERSION = 5    # 4: comp/bond values renamed (D94); older records are read through LEGACY_VALUES, not migrated
-
-
-@dataclass(frozen=True)
-class Param:
-    name: str                      # long name; the CLI flag is --<name with _ as ->
-    code: str                      # short code used in run-directory names ("" = never in a name)
-    default: Any
-    help: str
-    affects: str                   # "model" | "analysis" | "report"
-    type: Callable = str
-    choices: tuple | None = None
-    stem: bool = False             # part of the fixed <analysis>_<comp>-<tail>_<bond> stem
-    flag: bool = False             # a boolean switch rather than a value
-    always: bool = False           # appears in the run name even at its default value
-
-    @property
-    def cli(self) -> str:
-        return "--" + self.name.replace("_", "-")
 
 
 REGISTRY: tuple[Param, ...] = (
@@ -138,10 +123,6 @@ REGISTRY: tuple[Param, ...] = (
     Param("progress_every", "", 2000, "progress print interval in steps", "report", type=int),
 )
 
-BY_NAME = {p.name: p for p in REGISTRY}
-STEM = tuple(p.name for p in REGISTRY if p.stem)
-
-
 # The names these axes USED to carry. `c02` was named after an OpenSees material while its
 # siblings were named after the physics, and `nobond` said the opposite of what it meant — it is
 # perfect bond, the stiffest possible, not the absence of bond. Renamed 2026-09-08 (D94).
@@ -156,87 +137,16 @@ LEGACY_VALUES = {
 }
 
 
-def normalize(params: dict) -> dict:
-    """Map any legacy axis values in `params` to their current names, in place."""
-    for name, mapping in LEGACY_VALUES.items():
-        v = params.get(name)
-        if v in mapping:
-            params[name] = mapping[v]
-    return params
 
+REG = Registry(REGISTRY, SCHEMA_VERSION, LEGACY_VALUES,
+               stem_format="{analysis}_{comp}-{tail}_{bond}")
+BY_NAME = REG.by_name
+STEM = REG.stem
 
-def _value(name: str):
-    """argparse `type` that accepts a legacy value and hands back the current one."""
-    mapping = LEGACY_VALUES.get(name, {})
-    return lambda v: mapping.get(v, v)
-
-
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Derive the whole CLI from the registry.
-
-    Help text is %-ESCAPED on the way into argparse, which expands `%(default)s`-style tokens and
-    dies on a bare `%` — `--drift`'s "e.g. 0.012 for 1.2%" was enough to make `--help` raise while
-    every actual run worked. The registry keeps the unescaped text, since the reports render it.
-    """
-    def h(text: str) -> str:
-        return text.replace("%", "%%")
-
-    for p in REGISTRY:
-        if p.flag:
-            # A boolean gets both switches, so a True default is still overridable.
-            parser.add_argument(p.cli, dest=p.name, action="store_true", default=None,
-                                help=h(p.help) + f" (default {p.default})")
-            parser.add_argument("--no-" + p.name.replace("_", "-"), dest=p.name,
-                                action="store_false", help=argparse.SUPPRESS)
-        else:
-            parser.add_argument(p.cli, dest=p.name,
-                                type=_value(p.name) if p.name in LEGACY_VALUES else p.type,
-                                choices=p.choices, default=None,
-                                help=h(p.help) + f" (default {p.default})")
-
-
-def resolve(args: argparse.Namespace) -> dict:
-    """Every parameter, defaults included — the record `params.json` carries."""
-    out = {"schema_version": SCHEMA_VERSION}
-    for p in REGISTRY:
-        v = getattr(args, p.name, None)
-        out[p.name] = p.default if v is None else v
-    return normalize(out)
-
-
-def run_name(params: dict, *, stamp: str | None = None) -> str:
-    """`<stamp>_<analysis>_<comp>-<tail>_<bond>[_extras]`, extras only when non-default.
-
-    For humans. Nothing reads it back — the master report builds the matrix from `params.json`.
-    """
-    stamp = stamp or f"{datetime.now():%Y-%m-%d_%H%M%S}"
-    name = f"{stamp}_{params['analysis']}_{params['comp']}-{params['tail']}_{params['bond']}"
-    for p in REGISTRY:
-        if p.stem or not p.code:
-            continue
-        v = params[p.name]
-        if v == p.default and not p.always:
-            continue
-        if p.name == "drift":
-            # As a PERCENT, which is how the target is asked for and read: _d0.30pct.
-            name += f"_{p.code}{float(v) * 100:g}pct"
-        elif p.flag:
-            name += f"_{'' if v else 'no'}{p.code}"
-        else:
-            name += f"_{p.code}{v:g}" if isinstance(v, float) else f"_{p.code}{v}"
-    return name
-
-
-def comparable_key(params: dict, *, axis: str) -> tuple:
-    """What must match for two runs to differ ONLY in `axis`.
-
-    Report-only parameters are excluded, so adding a figure never splits a comparison in two.
-    """
-    return tuple((p.name, params.get(p.name, p.default))
-                 for p in REGISTRY
-                 if p.affects != "report" and p.name != axis)
-
-
-def describe(params: dict) -> list[tuple[str, Any, Any, str]]:
-    """(name, value, default, affects) rows, for the per-run report's parameter table."""
-    return [(p.name, params.get(p.name, p.default), p.default, p.affects) for p in REGISTRY]
+# --- the module-level API, delegated -------------------------------------------------------------
+normalize = REG.normalize
+add_arguments = REG.add_arguments
+resolve = REG.resolve
+run_name = REG.run_name
+comparable_key = REG.comparable_key
+describe = REG.describe

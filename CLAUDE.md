@@ -792,6 +792,15 @@ the thin-nonlinear-beam lattice instability, D34).
   headline is 0.997x. `master.variant_note()` now names what is non-default about the run shown
   (amber chip on the advisor page). A matrix that reduces N runs to one cell must say which it picked.
 
+- SHARED STUDY HARNESS (D103, `rclattice/study/`): the Aldemir parametric harness lifted into a
+  package a specimen CONFIGURES through a `StudySpec` (registry, `build(params)`, node selectors,
+  a `ReferenceSet` for the digitized record, a `ProtocolSet`, and the reporting text). Provides the
+  CLI, the timestamped run-directory contract, `report.md`, metrics/rescoring, the master matrix
+  with `variant_note`, the advisor page and the LaTeX run sheets. The Aldemir study runs through it
+  as thin wrappers (`study/study_spec.py`), verified identical on four regressions over its 45 runs.
+  `rclattice/study/registry.py` carries factories for the parameters every study shares; a
+  specimen's digitizer writes the `.npz` keys `references.py` documents.
+
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its
 cyclic/gauge/replot/compare scripts; the WSH3 cyclic run itself (staged: `cyclic.py --drift 0.0102 --gf-factor 2`, and see the
