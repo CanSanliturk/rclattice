@@ -1,0 +1,55 @@
+% Local preamble for the Aldemir-wall run sheets.
+% The house style lives in ../../shared/rclattice-report.sty (build.sh puts it on TEXINPUTS);
+% everything below is specific to a run sheet and belongs only to this report.
+\usepackage{rclattice-report}
+
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{needspace}
+\usepackage{fancyhdr}
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+
+% A run sheet is a reference document, so it is set tighter than a narrative report.
+\geometry{margin=20mm,top=22mm,bottom=22mm}
+\setlength{\LTpre}{4pt}\setlength{\LTpost}{8pt}
+
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\textsc{Aldemir wall — parametric run sheets}}
+\fancyhead[R]{\small\thepage}
+
+% ---------------------------------------------------------------------------------------------
+% The two table shapes a run sheet uses.
+%   \begin{factsheet} ... a two-column key/value block, one fact per row
+%   \begin{matsheet}  ... OpenSees material records: tag, type, arguments, what uses it
+% Both are longtables so a run that outgrows a page keeps its header.
+% ---------------------------------------------------------------------------------------------
+\newenvironment{factsheet}[1]
+  {\needspace{3\baselineskip}\par\smallskip\noindent\textbf{#1}\par\nopagebreak\smallskip
+   \begin{longtable}{@{}p{52mm}p{\dimexpr\textwidth-56mm\relax}@{}}\toprule}
+  {\bottomrule\end{longtable}}
+
+\newenvironment{famsheet}
+  {\small\begin{longtable}{@{}l r l r r r r r@{}}
+   \toprule \textbf{family} & \textbf{n} & \textbf{element} & \textbf{$L$ (mm)} &
+   \textbf{$A$ (mm$^2$)} & \textbf{$E$ (MPa)} & \textbf{$EA$ (N)} & \textbf{$EA/L$ (N/mm)} \\
+   \midrule \endfirsthead
+   \toprule \textbf{family} & \textbf{n} & \textbf{element} & \textbf{$L$ (mm)} &
+   \textbf{$A$ (mm$^2$)} & \textbf{$E$ (MPa)} & \textbf{$EA$ (N)} & \textbf{$EA/L$ (N/mm)} \\
+   \midrule \endhead}
+  {\bottomrule\end{longtable}}
+
+\newenvironment{matsheet}
+  {\small\begin{longtable}{@{}r l p{78mm} p{28mm}@{}}
+   \toprule \textbf{tag} & \textbf{type} & \textbf{arguments} & \textbf{applied to} \\ \midrule
+   \endfirsthead
+   \toprule \textbf{tag} & \textbf{type} & \textbf{arguments} & \textbf{applied to} \\ \midrule
+   \endhead}
+  {\bottomrule\end{longtable}}
+
+% a fixed-width value, for numbers and argument lists
+\newcommand{\val}[1]{\texttt{\small #1}}
+% the run-directory name, which is long and must not be hyphenated into nonsense
+\newcommand{\runid}[1]{{\small\ttfamily\raggedright #1\par}}

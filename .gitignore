@@ -69,3 +69,14 @@ src/examples/aydin_aldemir_wall/study/report_payload.json
 
 # Source-figure crops digitized from published papers — kept local, never published
 src/examples/*/data/*.png
+
+# Source papers and personal documents — copyrighted or not part of the project, never published
+src/examples/*/*.pdf
+!src/examples/*/study/master_report.pdf
+CE7016_TermProject_CanSanliturk.pdf
+
+# Run-sheet report: the PDF and the generator are tracked, everything generated is not
+# (regenerate with examples/doc/reports/aydin_aldemir_runs/build.sh, ~20 min)
+src/examples/doc/reports/aydin_aldemir_runs/build/
+src/examples/doc/reports/aydin_aldemir_runs/src/runs/
+src/examples/doc/reports/aydin_aldemir_runs/src/figures/
