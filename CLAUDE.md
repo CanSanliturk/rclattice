@@ -828,6 +828,15 @@ the thin-nonlinear-beam lattice instability, D34).
   flexural-yield quantity, so hardening/coupon strength will bind. Preflight: 26.8 h to 2.5% on the
   graded grid (0.293 h/mm, 46 steps/s). Run sheets: `doc/reports/thomsen_wallace_runs/`.
 
+- RW2 STAGE 1, UNIFORM GRID (D106): peak **139.4 kN = 0.854x** the measured 163.3 at 0.50% drift
+  (Aydin's own: 1.040x), converged to 2.5%, residual 0.9%. STIFF-THEN-WEAK against the test: 1.09x
+  the envelope at 0.5% drift, 0.91x at 1.0%, 0.81x at 1.5%; a 138 -> 125 kN step at 0.6% as the
+  compressed toe passes ε_c0 and sheds its moment to bars that cannot harden (verticals 44 -> 32%
+  of the base moment, rebar 28 -> 39%); 80%-drop capacity not reached (0.84 of peak at 2.5%). Points
+  at confinement and hardening/coupon strength as THIS specimen's axes. **Metric fix:** the D92 1 ms
+  window is Aldemir's T1 scale; on RW2 (T1 20 ms) it passed a release crest as a 148.5 kN peak —
+  `StudySpec.peak_window_s` (RW2: 5 ms; Aldemir unchanged). Graded-grid twin running, same curve.
+
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its
 cyclic/gauge/replot/compare scripts; the WSH3 cyclic run itself (staged: `cyclic.py --drift 0.0102 --gf-factor 2`, and see the

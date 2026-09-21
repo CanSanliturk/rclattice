@@ -3335,3 +3335,60 @@ amplitudes to ~72 mm) and every report says so. Run sheets: `doc/reports/thomsen
 
 **Status:** accepted. Stage 0 passed as a MEASUREMENT (the ratio is recorded, not gated at 1.00);
 Stage 1 is the 2.5% pushover on the baseline cell, launched on both grids.
+
+### D106 — 2026-09-21 — RW2 Stage 1, uniform grid: peak 0.854x the measured, stiff-then-weak against the test; and D92's 1 ms smoothing window is tied to Aldemir's T1 and let a crack-release crest through, so the window is now a per-specimen setting (RW2: 5 ms)
+
+**The run.** `2026-09-20_174437_pushover_crushing-solved_perfect_guniform_m30.5_d2.5pct`: the
+baseline cell (Concrete02 crushing / Gf-solved tail / perfect bond, b = 0.01, f_y 414, no rupture
+switch, residual floor 0.2), uniform 30.5 mm grid with bars snapped, explicit CentralDifference at
+dt 4.42 µs, ζ = 0.5, 7.6 mm/s, driven to **2.5% drift, converged**, 2,726,278 steps in 13.3 h
+(57 steps/s over the whole run, against 50 at preflight). Its graded-grid twin is still running and
+lies on the same curve wherever the two overlap (within 3 kN to 0.9% drift), so nothing below is a
+grid effect.
+
+**Result.** Peak **139.4 kN = 0.854x the measured 163.3** (Table 4), at 0.50% drift on a plateau
+0.465–0.507%; ascending-branch residual 0.9% of peak, so the peak is real resistance. Aydin's own
+lattice gives 1.040x on this specimen. The prediction put on record before the run (D105: "below
+the test, 0.85–0.92x, because V_flex at nominal f_y with no hardening is 0.82x") held at its lower
+edge. **The shape is stiff-then-weak:** at matched displacement the model is **1.088x** the test
+envelope at 18.3 mm (0.5%), **0.907x** at 36.6 mm (1.0%) and **0.809x** at 54.9 mm (1.5%). The test
+keeps gaining to 163 kN at ~1.5% drift; the model steps down from 138 to 125 kN at ~0.6% and slides
+to 116.7 kN (0.837 of peak) at 2.5%, so the 80%-drop capacity is **not reached** (a 5 ms-window
+dip crosses at 2.37%; windows of 10 ms and longer never cross).
+
+**What the step at 0.6% is.** The load-path probe across the base cut: concrete verticals carry
+43.9% of the overturning moment at 0.3% drift and 31.5% at 2.5%, the bars 28.2% → 39.3%, the
+diagonals flat at 26–31%. Only 66 of 22,002 struts are past ε_c0 at the end, all in the compression
+toe; the damage figure shows the tension side cracked through and the compressed boundary element
+splitting vertically near the base. So the compressed toe passes its peak strain, sheds its moment
+to the bars, and the bars at nominal f_y with b = 0.01 cannot grow into it — the plateau at ~125 kN
+is the steel couple plus N. Two things the real wall has that this cell does not: **confinement**
+(hoops at 76 mm in a 102 mm wall — D66 gave the hoops no separate grade, reasoning from WSH3's
+150 mm section) and **hardening / coupon strength** (the 2019 paper prints only the nominal
+414 MPa). Both point the same way and are the Stage 2/3 axes for THIS specimen; the compression law
+x tension tail matrix that mattered on Aldemir is expected to matter less.
+
+**The early stiffness is the other half.** Model 1.09x the test envelope at 0.5% drift: the test is
+softer early — strain penetration and bond slip at the base, absent under perfect bond (cf. SW-NC-FF,
+D52) — and stronger late. So the two errors are not one error with the wrong sign; a hardening fix
+that lifts the late plateau would leave the early overshoot, and a bond/penetration fix would move
+the early branch only.
+
+**The metric defect, third instance of D92's class.** The 1 ms moving-average window was chosen on
+Aldemir, where the local release mode is 1.8 ms against T1 = 5.8 ms. RW2's T1 is **20.1 ms**, and a
+crack-release crest at 0.615% drift (raw 162.3 kN, trough 89 kN, 9 ms above 140 kN) survived a
+1 ms average as a **148.5 kN "peak" with a plateau width of 0.0000%** — a spike, and `drift_capacity`
+then fired on the trough right behind it (0.615%, at the peak drift itself). Windows of 5, 10, 20
+and 40 ms all agree on **139.4 kN at 0.497%**. `StudySpec.peak_window_s` now carries the window per
+specimen (rule of thumb T1/4: 1.45 ms would reproduce Aldemir's 1 ms to within D92's measured 0.5%
+sensitivity; RW2 sets 5 ms), `runner` and `rescore` pass it, and the run was rescored. Aldemir's
+runs are NOT rescored — their window stays 1 ms and their numbers stand. The lesson generalises
+D92: a smoothing window is a time scale of the structure, not a constant.
+
+**Cost, measured.** 0.146 h/mm of drive on the uniform 30.5 grid (13.3 h over 91.5 mm) against the
+0.169 preflight bound; the graded 25 grid runs at ~30 steps/s on the cracked lattice, ~0.28 h/mm.
+`study_spec.H_PER_MM` updated to the measured value for the perfect-bond entry.
+
+**Status:** accepted. Stage 1 half done (graded twin running, ETA 2026-09-22 morning). Next: the
+graded twin's finish (grid objectivity of peak and plateau), then a Stage 2 shaped for this
+specimen — f_y / b / ε_su and a confined boundary grade — priced before launch.

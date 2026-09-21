@@ -66,7 +66,8 @@ def rescore(spec: StudySpec, d: Path, *, force: bool = False, dry_run: bool = Fa
         data["dt"] = dt
         data["dt_note"] = "reconstructed as T1/steps_per_period_used; the runner recorded no dt"
 
-    m = metrics.response_metrics(data["shear"], data["disp"], dt=dt, height=float(height))
+    m = metrics.response_metrics(data["shear"], data["disp"], dt=dt, height=float(height),
+                                 window_s=spec.peak_window_s or metrics.WINDOW_S)
     if not m:
         return "smoothing failed"
     data.update(m)

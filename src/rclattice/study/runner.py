@@ -311,7 +311,8 @@ def main(spec: StudySpec, argv=None) -> None:
         # `max` lands on a crest of it. Smooth over a physical window first; both are recorded, and
         # `peak_ringing_ratio` says whether the two ever differed.
         dt_marched = res.get("dt") or (res.get("T1", float("nan")) / spp)
-        data.update(metrics.response_metrics(res["shear"], res["disp"], dt=dt_marched, height=height))
+        data.update(metrics.response_metrics(res["shear"], res["disp"], dt=dt_marched, height=height,
+                                             window_s=spec.peak_window_s or metrics.WINDOW_S))
         data.update({"peak_shear": peak, "drift_at_peak": at_peak, "end_drift": end_drift,
                      "k_initial": k0, "converged": res["converged"], "steps": len(res["disp"]),
                      "disp": res["disp"], "shear": res["shear"], "groups": res.get("groups"),

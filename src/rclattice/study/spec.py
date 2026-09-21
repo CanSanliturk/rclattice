@@ -93,6 +93,11 @@ class StudySpec:
     bond_axis: str | None = "bond"             # the axis whose non-`perfect_bond` values are bonded
     perfect_bond: str = "perfect"
     elastic_target_drift: float = 0.0002       # an order below where the wall cracks
+    # The smoothing window behind the headline peak (D92). 1 ms was chosen for Aldemir, whose T1 is
+    # 5.8 ms; on a wall with T1 = 20 ms a crack-release crest survives 1 ms and read as a 148.5 kN
+    # peak over a 139 kN plateau (D106). A specimen sets it against ITS OWN T1 — T1/4 is the rule
+    # of thumb, which reproduces Aldemir's 1 ms to within a factor 1.5 and gives RW2 5 ms.
+    peak_window_s: float | None = None         # None = metrics.WINDOW_S (1 ms)
     cell_label: Callable[[dict], str] | None = None   # "linear/solved, perfect" for legends
     variant_keys: tuple[str, ...] = ("mesh", "damping", "steel_rupture", "concrete_residual",
                                      "bond_damage", "gf")

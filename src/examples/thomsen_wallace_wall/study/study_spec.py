@@ -67,9 +67,10 @@ PRESETS = {
     "to1p0": (0.001, 0.0025, 0.005, 0.0075, 0.010),
     "to2p0": (0.001, 0.0025, 0.005, 0.0075, 0.010, 0.015, 0.020),
 }
-# hours per mm of drive path: MEASURED by preflight.py on the graded 25 mm grid (see D105); the
+# hours per mm of drive path: MEASURED on the finished uniform-30.5 Stage 1 push (D106); the graded
+# 25 grid runs ~1.9x dearer; the
 # bonded value is scaled by the Aldemir bond/perfect ratio 0.227/0.0284 = 8.0 until measured.
-H_PER_MM = {"perfect": 0.115, "bond": 0.92}
+H_PER_MM = {"perfect": 0.146, "bond": 1.17}    # perfect MEASURED on the finished uniform-30.5 push (D106); bond scaled x8 as on Aldemir
 PROTOCOLS = ProtocolSet(
     presets=PRESETS, h_per_mm=H_PER_MM, ladder=LADDER, invented=True,
     invented_note=("THE PROTOCOL LEVELS ARE INVENTED: the 2019 paper says the test was cycled at\n"
@@ -228,6 +229,9 @@ SPEC = StudySpec(
     element_modulus=models.element_modulus,
     damage_thresholds=damage_thresholds,
     bond_axis="bond", perfect_bond="perfect",
+    # T1 = 20 ms here (Aldemir: 5.8 ms), so D92's 1 ms window lets a crack-release crest through:
+    # windows of 5-40 ms all agree on 139.4 kN at 0.50% where 1 ms read 148.5 at 0.615% (D106).
+    peak_window_s=5.0e-3,
     cell_label=lambda p: f"{p['comp']}/{p['tail']}, {p['bond']}",
     variant_keys=("grid", "mesh", "field", "damping", "steel_rupture", "concrete_residual",
                   "steel_b", "bond_damage", "gf", "fy"),
