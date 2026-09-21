@@ -81,3 +81,6 @@ CE7016_TermProject_CanSanliturk.pdf
 src/examples/doc/reports/*_runs/build/
 src/examples/doc/reports/*_runs/src/runs/
 src/examples/doc/reports/*_runs/src/figures/
+
+# RW2 personal run board: generated page and scored-run cache (regenerate: board/refresh_board.py)
+src/examples/thomsen_wallace_wall/board/out/
