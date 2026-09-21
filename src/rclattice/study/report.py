@@ -58,10 +58,16 @@ def s_model(spec, params, data) -> str:
                                f"{m.get('drift_cr', 0):.4%} drift"]]
     if m.get("material_overrides"):
         o = m["material_overrides"]
-        rows.append(["material overrides", f"fc {o['fc'][0]} -> {o['fc'][1]}, "
-                                           f"ft {o['ft'][0]} -> {o['ft'][1]}, "
-                                           f"epsc0 {o['epsc0'][0]:.6f} -> {o['epsc0'][1]:.6f} "
-                                           f"({o['note']})"])
+        parts = []
+        if "fc" in o:
+            parts.append(f"fc {o['fc'][0]} -> {o['fc'][1]}, "
+                         f"ft {o['ft'][0]} -> {o['ft'][1]}, "
+                         f"epsc0 {o['epsc0'][0]:.6f} -> {o['epsc0'][1]:.6f}")
+        if "fy" in o:
+            parts.append(f"fy {o['fy'][0]:g} -> {o['fy'][1]:g}")
+        if o.get("note"):
+            parts.append(f"({o['note']})")
+        rows.append(["material overrides", ", ".join(parts)])
     note = ""
     if m.get("strut_life_orthogonal", 99) < 10:
         note = ("\n\n**Strut life below 10**: a strut fails almost immediately after cracking and "
