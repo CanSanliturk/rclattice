@@ -77,6 +77,14 @@ N_BE_POS = 4                          # bar positions per boundary element
 WEB_PITCH = 191.0                     # "@191 mm" — both directions
 HOOP_PITCH = 76.0                     # "@ 76 mm"
 
+# TOP LOAD-INTRODUCTION BAND (Fig. 9a). The drawing shows the top ~quarter of the wall with
+# CLOSELY-SPACED horizontal reinforcement across the FULL width (web included), denser than the
+# nominal @191 web bars — a load-introduction zone, and the physical twin of running the vertical
+# bars to the top (`full_height`, D78/D84). Its EXTENT and SPACING are INFERRED off the schematic
+# (~1000 mm tall at ~76 mm pitch, the hoop spacing) and are OFF by default so no existing run
+# changes; the study exposes them as `--top-band` / `--top-band-pitch` (D108).
+TOP_BAND_PITCH = 76.0                 # default dense-zone spacing when enabled (inferred, Fig. 9a)
+
 X_BE_LEFT = tuple(COVER_X + i * BE_PITCH for i in range(N_BE_POS))            # 19 .. 172
 X_BE_RIGHT = tuple(LW - x for x in reversed(X_BE_LEFT))                       # 1048 .. 1201
 _web_span = X_BE_RIGHT[0] - X_BE_LEFT[-1]                                     # 876
@@ -208,12 +216,20 @@ def bar_layout(grid: str = GRID, mesh_size: float = MESH) -> dict:
 
 
 def rebars(grid: str = GRID, mesh_size: float = MESH, *, length: float = LW, height: float = HW,
-           full_height: bool = True) -> tuple[Rebar, ...]:
+           full_height: bool = True, top_band: float = 0.0,
+           top_band_pitch: float = TOP_BAND_PITCH) -> tuple[Rebar, ...]:
     """Every bar as an in-plane line on the chosen grid.
 
     Vertical bars are tagged "longitudinal"; hoops and horizontal web bars "stirrup" (the
     visualizer's split). `full_height` runs the vertical bars to the top face (D78/D84 — the
     default here, since the actuator loads the top row and a plain-concrete band under it tears).
+
+    `top_band` (mm, 0 = off) adds the Fig. 9(a) load-introduction band: denser horizontal bars in
+    the TOP `top_band` mm at `top_band_pitch`. They span the WEB only (inner boundary bar to inner
+    boundary bar), because the boundary elements are already dense at @76 through their hoops —
+    a full-width bar there would double the boundary steel. Deduped against the nominal @191 web
+    rows so no two rebars share a node pair. Net effect: the top zone reads ~@76 across the full
+    width (hoops over the boundaries, these over the web), as the drawing shows (D108).
     """
     lay = bar_layout(grid, mesh_size)
     xs, ys = grid_lines(grid, mesh_size, length=length, height=height)
@@ -229,6 +245,20 @@ def rebars(grid: str = GRID, mesh_size: float = MESH, *, length: float = LW, hei
         bars.append(Rebar(path=[(xr_in, y), (xr, y)], area=A_HOOP_LINE, steel=STEEL, role="stirrup"))
     for y in lay["y_web"]:                       # horizontal web bars, outer bar to outer bar
         bars.append(Rebar(path=[(xl, y), (xr, y)], area=A_WEB_LINE, steel=STEEL, role="stirrup"))
+    if top_band > 0.0:                           # dense top load-introduction band (Fig. 9a, D108)
+        web = {round(y, 3) for y in lay["y_web"]}   # full-width @191 rows already cover the web here
+        n = int(round(top_band / top_band_pitch))
+        for i in range(n):
+            y_target = height - (i + 0.5) * top_band_pitch
+            if y_target < height - top_band - EPS or y_target <= 0.0:
+                continue
+            y = snap(y_target, ys)
+            key = round(y, 3)
+            if key in web:                       # an @191 web bar already spans the web on this line
+                continue
+            web.add(key)
+            bars.append(Rebar(path=[(xl_in, y), (xr_in, y)], area=A_WEB_LINE, steel=STEEL,
+                              role="stirrup"))
     return tuple(bars)
 
 

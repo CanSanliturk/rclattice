@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from rclattice.viz import draw_model_kinds  # noqa: E402
 
 from build import calibrate, describe, wall_lattice  # noqa: E402
-from specimen import GRID, HORIZON, HW, LW, MESH, OUT, SPECIMEN, TW  # noqa: E402
+from specimen import GRID, HORIZON, HW, LW, MESH, OUT, SPECIMEN, TOP_BAND_PITCH, TW  # noqa: E402
 
 
 def main() -> None:
@@ -27,11 +27,16 @@ def main() -> None:
     ap.add_argument("--mesh", type=float, default=MESH)
     ap.add_argument("--horizon", type=float, default=HORIZON)
     ap.add_argument("--nonlinear", action="store_true")
+    ap.add_argument("--top-band", type=float, default=0.0,
+                    help="dense top load-introduction band height in mm (Fig. 9a, D108); 0 = off")
+    ap.add_argument("--top-band-pitch", type=float, default=TOP_BAND_PITCH,
+                    help="dense top-band spacing in mm (default = 76 mm hoop pitch)")
     args = ap.parse_args()
 
     cal = calibrate(mesh_size=args.mesh, horizon=args.horizon)
     model, _edges = wall_lattice(cal.area, grid=args.grid, mesh_size=args.mesh,
-                                 horizon=args.horizon, nonlinear=args.nonlinear)
+                                 horizon=args.horizon, nonlinear=args.nonlinear,
+                                 top_band=args.top_band, top_band_pitch=args.top_band_pitch)
     print(f"{SPECIMEN}  {LW:.0f} x {HW:.0f} x {TW:.0f}, {args.grid} grid at {args.mesh:g} mm")
     print(f"  {describe(model)}")
 

@@ -37,8 +37,8 @@ from rclattice.materials import (
 from rclattice.mesh import (connect_index_horizon, mesh_rectangle_lines, tributary_area_scale)
 
 from specimen import (
-    EC, FT, GF, GRADES, GRID, HORIZON, HW, LW, MESH, N_AXIAL, NU, TW, X_BARS, Y_HOOPS,
-    check_mesh_alignment, grid_lines, rebars, wall_problem, zone_of,
+    EC, FT, GF, GRADES, GRID, HORIZON, HW, LW, MESH, N_AXIAL, NU, TOP_BAND_PITCH, TW, X_BARS,
+    Y_HOOPS, check_mesh_alignment, grid_lines, rebars, wall_problem, zone_of,
 )
 
 
@@ -87,10 +87,12 @@ def grid_for(grid: str = GRID, mesh_size: float = MESH, *, length: float = LW,
     return coords, quads, pairs
 
 
-def _bars(grid, mesh_size, length, height, full_height, reinforced, steel_b):
+def _bars(grid, mesh_size, length, height, full_height, reinforced, steel_b,
+          top_band=0.0, top_band_pitch=TOP_BAND_PITCH):
     if not reinforced:
         return ()
-    bars = rebars(grid, mesh_size, length=length, height=height, full_height=full_height)
+    bars = rebars(grid, mesh_size, length=length, height=height, full_height=full_height,
+                  top_band=top_band, top_band_pitch=top_band_pitch)
     if steel_b is None:
         return bars
     return tuple(dataclasses.replace(
@@ -120,6 +122,8 @@ def wall_lattice(
     steel_rupture: float | None = None,
     concrete_residual: float = 0.2,
     steel_b: float | None = None,
+    top_band: float = 0.0,
+    top_band_pitch: float = TOP_BAND_PITCH,
 ):
     """The calibrated RC lattice on either grid. `nonlinear=False` gives the elastic twin.
 
@@ -166,7 +170,8 @@ def wall_lattice(
     model, edges = build_lattice_rc(
         wall_problem(length=length, height=height), mesh_size,
         material_for=material_for, zone_of=zone_of,
-        rebars=_bars(grid, mesh_size, length, height, full_height_rebar, reinforced, steel_b),
+        rebars=_bars(grid, mesh_size, length, height, full_height_rebar, reinforced, steel_b,
+                     top_band=top_band, top_band_pitch=top_band_pitch),
         strut_area=area, horizon=horizon, strut_element=strut_element,
         rebar_material=rebar_material, **extra)
     return model, edges

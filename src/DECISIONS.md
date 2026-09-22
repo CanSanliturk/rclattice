@@ -3424,3 +3424,63 @@ the test had strain penetration — is unchanged by the grid.
 
 **Status:** accepted. Stage 1 complete. A follow-on session has since launched Stage 2 cells on the
 uniform grid (`fy454`, `fy454 + sb0`, `linear + fy454`, to 1.5%); those are its to record.
+
+### D108 — 2026-09-22 — Fig. 9(a)'s dense top load-introduction band added as an opt-in CLI axis (`--top-band`); and the comp=linear Stage 2 run read correctly — it hit its 1.5% TARGET (not a failure), robust peak 146.6 kN = 0.898x, and would reach the test's 1.97% at a flat ~144 kN plateau: the displacement, not the force
+
+**Context (user).** On the side-by-side of Aydin's Fig. 9(a) against our lattice (built this turn),
+the user spotted that the paper's TOP is more heavily reinforced than ours, and asked to (1) add
+that top zone as a CLI argument, updating runs/labels/docs, and (2) explain why the `comp=linear`
+Stage 2 run stopped where it did, what the test's push range is, and whether that model would reach
+it.
+
+**The drawing difference, measured off the 300-dpi clip.** Fig. 9(a)'s top ~1000 mm (top quarter)
+shows closely-spaced HORIZONTAL reinforcement across the FULL width, web included — denser than the
+nominal @191 web bars. Below it the web drops to @191 and only the boundary elements stay dense
+(their hoops @76). Read as a LOAD-INTRODUCTION zone: where the actuator force enters and needs
+distributing — the physical twin of running the vertical bars to the top (`full_height`, D78/D84).
+The primary Thomsen & Wallace report is not in the repo, so the "load-introduction" reading is an
+inference; the drawing difference itself is definite. Our web-horizontal layout was already flagged
+INFERRED in `specimen.py` (spacing @191, start height), and Aydin evidently used a denser top course
+we had simplified to uniform @191.
+
+**The feature (opt-in, nothing default changes).** `--top-band <mm>` (0 = off, the default) with
+`--top-band-pitch <mm>` (default 76 = the hoop pitch). `rebars()` adds WEB-SPAN horizontal bars
+(inner boundary bar to inner boundary bar) at the pitch over the top band, deduped against the @191
+web rows. Web span, NOT full width, because the boundary elements are already dense at @76 through
+their hoops — a full-width bar there would DOUBLE the boundary steel, and on a coarse grid collides
+with hoop rows under snapping. Net effect: the top zone reads ~@76 across the full width (hoops over
+the boundaries, these over the web), as drawn. Registry schema v1 → v2 (`top_band`,
+`top_band_pitch`); the run name gains `_tb<mm>` only when on; `sources`/`title_fmt`/`variant_keys`/
+`cross_run_axes` all updated so the report, master matrix and run sheets name it. Threaded
+specimen → build (`_bars`, `wall_lattice`) → study (`models.build`, meta) → `draw.py`. Verified: a
+band-off run's name and element count are byte-identical to v1; `--top-band 1000` on the uniform 30.5
+grid adds 11 web-span bars (22,002 → 22,310 elements), and the render shows the denser top zone.
+
+**The comp=linear run, read correctly** (`2026-09-22_013850_pushover_linear-solved_perfect_guniform_m30.5_fy454_d1.5pct`).
+It did NOT fail — it reached the **1.5% drift TARGET we set** (`--drift 0.015` = 54.9 mm), converged,
+1,656,014 steps, 6.8 h, still carrying ~144 kN. The metric's headline **170.6 kN at 0.59% drift is a
+CRACK-RELEASE RING**, not resistance: only 29 of 1.66M samples exceed 160 kN, the ±4000-step window
+swings 76 → 170 kN inside 0.007% drift, and `peak_ringing_ratio` = 1.16 — so the 5 ms window
+UNDER-caught this one (a bigger release than the crest D106 tuned the window against; the window is a
+suppressor, not a guarantee). The **robust (20 ms rolling-median) peak is 146.6 kN = 0.898x** the
+measured 163.3 at 0.585% drift — which reconciles exactly with the earlier "146.7" (170.6 / 1.163).
+It then holds a **flat plateau 143–144 kN out to 1.5%**, no descending branch, because elastic
+compression never crushes; the crushing twin sagged to ~131 kN by 1.5%. THAT stability is why the
+curve looks promising.
+
+**Test push range and the verdict.** RW2 was driven to **72.0 mm = 1.97% drift** (Table 2), backbone
+to 71.6 mm, and the record ENDS at ~72 mm still carrying ~144 kN (test peak 163.3). Would comp=linear
+reach that? **Yes, trivially** — with elastic compression and no steel rupture there is no collapse
+mechanism, so it would push through 1.97% holding ~144 kN. But it reaches the **displacement, not the
+force**: it plateaus at ~144 kN = **0.88x** the test peak. The base flexural capacity at f_y = 454,
+b = 0.01 is ~146 kN, full stop — lifting the plateau needs the BASE-flexural levers (coupon strength,
+hardening b, the tension contribution / mesh), the same reading as D105-D107.
+
+**PREDICTION, NOT YET RUN (per D75/D92).** The top band is load-INTRODUCTION, not base flexure, so it
+is predicted NOT to lift the peak on this flexure-controlled specimen; it is worth having for fidelity
+and top-tearing robustness. No FE run of the band, and no comp=linear push to 1.97%, has been launched
+— both are the user's call at a stated drift target.
+
+**Status:** accepted (feature + the reading of a finished run). Feature is example-layer + RW2 study
+only; the shared harness (`rclattice/study/`) is untouched, so Aldemir and other studies are
+unaffected. Tests unaffected (none pin the RW2 schema).

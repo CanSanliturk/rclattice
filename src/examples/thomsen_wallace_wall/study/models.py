@@ -103,7 +103,9 @@ def build(params: dict):
         reinforced=bool(params["rebar"]), full_height_rebar=bool(params["rebar_top"]),
         steel_rupture=(float(params["steel_rupture"]) or None),
         concrete_residual=float(params["concrete_residual"]),
-        steel_b=steel_b(params), length=length, height=height, **bond_kwargs(params))
+        steel_b=steel_b(params), length=length, height=height,
+        top_band=float(params["top_band"]), top_band_pitch=float(params["top_band_pitch"]),
+        **bond_kwargs(params))
     gff = gf_factor(params)
     meta = {
         "panel_mm": [length, height],
@@ -118,6 +120,8 @@ def build(params: dict):
         "steel_rupture": float(params["steel_rupture"]) or None,
         "concrete_residual": float(params["concrete_residual"]),
         "steel_b": float(params["steel_b"]),
+        "top_band_mm": float(params["top_band"]),
+        "top_band_pitch_mm": float(params["top_band_pitch"]),
         "gf_factor": gff,
         "material_overrides": overrides,
         "area_mm2": cal.area,

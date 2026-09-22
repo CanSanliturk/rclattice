@@ -191,7 +191,8 @@ level above it (D11).
       thomsen_wallace_wall/       # "RW2" — Thomsen & Wallace (1995, 2004) slender wall, aspect 3.0, N = 378 kN,
                                   #   second-hand through Aydin (2019) Fig. 9 (D105). specimen/testdata/build/
                                   #   summary/draw/preflight/digitize + study/ on the shared harness (D103);
-                                  #   TWO grid modes, uniform and rebar-aligned graded (D104)
+                                  #   TWO grid modes, uniform and rebar-aligned graded (D104); opt-in
+                                  #   dense top load-introduction band --top-band (D108)
       vk3_wall/                   # "VK3" — squat wall-type BRIDGE PIER (Bimschas 2010, IBK
                                   #   Bericht 326, ETH Zurich, Ch. 5). The first SHEAR-relevant
                                   #   specimen: Lv/lw = 2.20 but rho_sw = 0.08%, shear 20-22% of
@@ -841,6 +842,18 @@ the thin-nonlinear-beam lattice instability, D34).
   graded/uniform 0.992 on peak and 0.98–1.05 at matched drift from 0.3 to 2.5%, so the baseline is
   grid-objective (cf. D98). The bar-exact grid costs 2.5x and changes no answer: Stage 2 runs on the
   uniform 30.5 grid, the graded grid stays the objectivity check. Stage 1 complete.
+
+- RW2 TOP LOAD-INTRODUCTION BAND + comp=linear read (D108): Fig. 9(a)'s top ~quarter is drawn with
+  denser full-width horizontal reinforcement than ours (a load-introduction zone, the twin of
+  `full_height` bars) — now an OPT-IN CLI axis `--top-band <mm>` / `--top-band-pitch <mm>` (0 = off
+  default, so no v1 run changes; registry schema v2). It adds WEB-SPAN bars (the boundary is already
+  dense via hoops); `--top-band 1000` on uniform 30.5 adds 11 bars (22,002 → 22,310 elements).
+  PREDICTED not to lift the peak (load-introduction, not base flexure) — NOT YET RUN. Separately, the
+  finished `comp=linear` Stage 2 run was read correctly: it hit its 1.5% TARGET (converged, not a
+  failure), the metric's 170.6 kN headline is a crack-release RING (robust peak **146.6 kN = 0.898x**
+  at 0.585%, 5 ms window under-caught it), then a flat ~143–144 kN plateau — no descending branch
+  (elastic compression never crushes). It would reach the test's 1.97%/72 mm trivially but at ~144 kN
+  = 0.88x: the displacement, not the force. Peak stays a base-flexural quantity (coupon f_y / b / mesh).
 
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its

@@ -95,6 +95,11 @@ SOURCES = {
     "rebar_top": ("assumed", "bars run to the driven top row (D78/D84)"),
     "rebar": ("measured", "Fig. 9(a): 8-#3 per boundary element, 8-#2 web, #2 @ 191 horizontal, "
                           "4.76 mm hoops @ 76"),
+    "top_band": ("assumed", "Fig. 9(a) draws a dense top load-introduction band across the full "
+                            "width; its ~1000 mm extent is inferred off the schematic, not "
+                            "dimensioned (D108). Off by default"),
+    "top_band_pitch": ("assumed", "the dense top-band spacing; defaults to the 76 mm hoop pitch "
+                                  "(D108)"),
     "fc": ("measured", "Table 1"),
     "ft": ("measured", "Table 1, no footnote (= 0.31 sqrt(fc))"),
     "fy": ("measured", "Table 1 — the NOMINAL Grade 60; measured coupons are not printed"),
@@ -168,6 +173,8 @@ TITLE_FMT = {
     "rebar": lambda v: "no reinforcement" if not v else "",
     "rebar_top": lambda v: "" if v else "bars stop below the top",
     "mesh": lambda v: f"mesh {float(v):g}\\,mm",
+    "top_band": lambda v: f"top band {float(v):g}\\,mm" if float(v) else "",
+    "top_band_pitch": lambda v: "",
     "drift": lambda v: "",
     "proto": lambda v: "",
 }
@@ -234,8 +241,9 @@ SPEC = StudySpec(
     peak_window_s=5.0e-3,
     cell_label=lambda p: f"{p['comp']}/{p['tail']}, {p['bond']}",
     variant_keys=("grid", "mesh", "field", "damping", "steel_rupture", "concrete_residual",
-                  "steel_b", "bond_damage", "gf", "fy"),
-    cross_run_axes=("grid", "mesh", "field", "horizon", "gf", "steel_b", "steel_rupture"),
+                  "steel_b", "bond_damage", "gf", "fy", "top_band"),
+    cross_run_axes=("grid", "mesh", "field", "horizon", "gf", "steel_b", "steel_rupture",
+                    "top_band"),
     sources=SOURCES,
     licence=licence,
     calibration_note=("uniaxial (D47 default; Stage 0 measured it at 0.951 of the same-grid "

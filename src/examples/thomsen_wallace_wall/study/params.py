@@ -8,6 +8,8 @@ the axes below.
 v1 (2026-09-20): first registry — `comp` / `tail` / `bond` as for Aldemir (D94 names from the
 start, no legacy spellings), plus `grid` (D104), `field` (the calibration route, measured in
 Stage 0) and `nu`.
+v2 (2026-09-22): `top_band` / `top_band_pitch` — the Fig. 9(a) dense top load-introduction band
+(D108), OFF by default so no v1 run changes.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from rclattice.study.registry import (Param, Registry, analysis_param, analysis_
                                       concrete_params, discretisation_params, failure_params,
                                       rebar_params, report_params)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REGISTRY: tuple[Param, ...] = (
     analysis_param(),
@@ -56,6 +58,11 @@ REGISTRY: tuple[Param, ...] = (
 
     # --- reinforcement ------------------------------------------------------------------------
     *rebar_params(),
+    Param("top_band", "tb", 0.0, "dense top load-introduction band: height in mm of denser "
+          "full-width horizontal web bars at the top (Fig. 9a, D108); 0 = off, the default. "
+          "The drawing suggests ~1000 mm — INFERRED, not dimensioned", "model", type=float),
+    Param("top_band_pitch", "tbp", 76.0, "spacing in mm of the dense top-band bars (default = the "
+          "76 mm hoop pitch); only meaningful when --top-band > 0", "model", type=float),
 
     # --- the analysis -------------------------------------------------------------------------
     *analysis_params(drift=0.025, rate=7.6, damping=0.5, cycles=1),
