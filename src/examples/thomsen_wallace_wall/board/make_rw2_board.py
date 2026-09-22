@@ -23,7 +23,7 @@ STATE = {
          "samples": [(100000,0.0917,75.5,1904),(200000,0.1834,100.9,4057),(300000,0.2751,116.6,6207),(400000,0.3668,130.0,8335),(500000,0.4585,138.3,10372),(600000,0.5502,137.9,12108),(700000,0.6419,128.8,13829),(800000,0.7336,129.6,15613),(900000,0.8253,127.0,17156),(1000000,0.917,125.4,18792),(1100000,1.0087,126.0,20476),(1200000,1.1004,124.4,22169),(1300000,1.1921,124.1,23827),(1400000,1.2838,124.1,25469),(1500000,1.3755,122.1,27190),(1600000,1.4672,123.7,28899),(1700000,1.5589,123.4,30612),(1800000,1.6506,123.7,32310),(1900000,1.7423,122.0,33988),(2000000,1.834,123.6,35662),(2100000,1.9257,123.4,37393),(2200000,2.0174,121.6,39117),(2300000,2.1091,117.9,40792),(2400000,2.2008,115.4,42463),(2500000,2.2925,116.9,44143),(2600000,2.3842,115.7,45842),(2700000,2.4759,116.7,47514)]},
         {"key": "graded", "name": "graded 25 mm grid", "sub": "bars on nodes exactly · the deliverable run",
          "elements": "7,446 nodes · 32,423 elements", "n": 4395483, "color": "var(--gra)",
-         "samples": [(100000,0.0569,53.6,2830),(200000,0.1138,85.0,6235),(300000,0.1706,98.1,9602),(400000,0.2275,108.4,13121),(500000,0.2844,118.4,16748),(600000,0.3413,126.6,20006),(700000,0.3981,134.8,23436),(800000,0.455,137.8,26563),(900000,0.5119,138.2,29194),(1000000,0.5688,135.8,31776),(1100000,0.6256,135.5,34267),(1200000,0.6825,135.7,36780),(1300000,0.7394,135.5,39340),(1400000,0.7963,134.7,41846),(1500000,0.8531,129.3,44364),(1600000,0.91,129.1,46885),(1700000,0.9669,128.9,49130)]},
+         "samples": [(100000,0.0569,53.6,2830),(200000,0.1138,85.0,6235),(300000,0.1706,98.1,9602),(400000,0.2275,108.4,13121),(500000,0.2844,118.4,16748),(600000,0.3413,126.6,20006),(700000,0.3981,134.8,23436),(800000,0.455,137.8,26563),(900000,0.5119,138.2,29194),(1000000,0.5688,135.8,31776),(1100000,0.6256,135.5,34267),(1200000,0.6825,135.7,36780),(1300000,0.7394,135.5,39340),(1400000,0.7963,134.7,41846),(1500000,0.8531,129.3,44364),(1600000,0.91,129.1,46885),(1700000,0.9669,128.9,49130),(1800000,1.0238,128.9,51161),(1900000,1.0807,129.2,53138),(2000000,1.1375,127.4,55424),(2100000,1.1944,127.9,58510),(2200000,1.2513,127.9,61658),(2300000,1.3082,127.3,64848),(2400000,1.365,127.7,68049),(2500000,1.4219,127.0,71304),(2600000,1.4788,125.9,74545),(2700000,1.5357,126.5,77806),(2800000,1.5925,126.5,81180),(2900000,1.6494,125.7,84629),(3000000,1.7063,121.6,88064),(3100000,1.7632,121.4,91467),(3200000,1.82,121.0,94336),(3300000,1.8769,118.8,96382),(3400000,1.9338,119.9,98427),(3500000,1.9907,119.7,100476),(3600000,2.0476,120.1,102526),(3700000,2.1044,120.2,104579),(3800000,2.1613,120.1,106630),(3900000,2.2182,119.8,108681),(4000000,2.2751,119.1,110733),(4100000,2.3319,118.7,112771),(4200000,2.3888,117.3,114783),(4300000,2.4457,117.2,117120)]},
     ],
 }
 el = (NOW - T0).total_seconds()
@@ -181,13 +181,13 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
   </header>
 
   <section class="sect">
-    <h2>Now</h2>
+    <h2>Stage 1 · complete</h2>
     <div class="tiles">
       <div class="tile"><span class="k">uniform 30.5 · finished</span><span class="v">{FIN['uniform']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['uniform']['peak']:.1f} kN at {FIN['uniform']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
-      <div class="tile"><span class="k">graded 25 · running</span><span class="v">{gra['samples'][-1][1]:.2f}%</span><span class="s">drift reached · {gra['samples'][-1][2]:.1f} kN · ETA Tue ~09:00</span></div>
+      <div class="tile"><span class="k">graded 25 · finished</span><span class="v">{FIN['graded']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['graded']['peak']:.1f} kN at {FIN['graded']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
       <div class="tile test"><span class="k">measured · Aydin</span><span class="v">163.3</span><span class="s">kN, Table 4 · Aydin's own lattice 1.040 ×</span></div>
     </div>
-    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. The uniform run is finished and scored from its stored series (5 ms smoothing — T1 is 20 ms here, D106); the graded run's numbers are console samples every 100,000 steps.</p>
+    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. Both runs are finished and scored from their stored series (5 ms smoothing — T1 is 20 ms here, D106). Nothing is running.</p>
   </section>
 
   <section class="sect">
@@ -197,7 +197,7 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
     <h3>the range reached so far</h3>
     <canvas id="cZoom" style="height:300px" aria-label="Both runs over the record, zoomed to the drift reached so far"></canvas>
     {LEGEND}
-    <p><b>The two grids sit on one curve</b> where they overlap (0.06–0.23% drift, within 3 kN), so the grid mode is not the variable. <b>The uniform run has peaked at ~138 kN = 0.85 × the measured</b>, the flexural-yield plateau the section check predicted (134 kN at nominal f<sub>y</sub>, no hardening), and is <b>7% down by 0.64%</b> while the test envelope there is still rising past 150 kN toward 163 at ~1.5%.</p>
+    <p><b>The two grids give one answer.</b> Peaks 139.4 (uniform) and 138.3 kN (graded), 0.854 and 0.847 × the measured; at matched drift the graded/uniform ratio runs 0.98–1.05 from 0.3% to 2.5%. So the peak, the 0.6% step and the post-peak slide are properties of the model, not of the discretization — the same conclusion Aldemir's mesh 25/50 pair gave (D98). Both are the flexural-yield plateau the section check predicted (134 kN at nominal f<sub>y</sub>, no hardening), and both fall behind a test that keeps rising to 163 kN at ~1.5%.</p>
   </section>
 
   <section class="sect">
@@ -244,7 +244,7 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
     <h2>Plan</h2>
     <div class="plan">
       <div class="step"><span class="n">stage 0</span><span class="w">Elastic gates<small>continuum, cantilever, both calibration fields, both grids</small></span><span class="chip ok"><i></i>done</span></div>
-      <div class="step"><span class="n">stage 1</span><span class="w">Baseline pushover to 2.5%<small>crushing / solved / perfect — uniform grid done at 0.854 ×; graded grid running</small></span><span class="chip live"><i></i>half done</span></div>
+      <div class="step"><span class="n">stage 1</span><span class="w">Baseline pushover to 2.5%<small>crushing / solved / perfect — uniform 0.854 ×, graded 0.847 ×; grid-objective to 5% at every drift</small></span><span class="chip ok"><i></i>done</span></div>
       <div class="step"><span class="n">stage 2</span><span class="w">The matrix<small>compression law × tension tail; priced, parallel</small></span><span class="chip todo">next</span></div>
       <div class="step"><span class="n">stage 3</span><span class="w">Failure model<small>--steel-rupture × --concrete-residual 0, then b × ε<sub>su</sub>; likely also f<sub>y</sub> and a confined boundary grade</small></span><span class="chip todo">queued</span></div>
       <div class="step"><span class="n">stage 4</span><span class="w">Cyclic<small>on the cell that reproduces the monotonic peak; levels invented, said so</small></span><span class="chip todo">queued</span></div>
@@ -255,7 +255,8 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
     <h2>Findings so far</h2>
     <div class="find">
       <div class="f alert"><span class="t">Peak here is a yield quantity, not a cracking one</span><span class="b">V<sub>flex</sub> at nominal f<sub>y</sub> is 0.82 × the test and the run plateaus at 0.85 ×. The f<sub>y</sub> / b / ε<sub>su</sub> axes will matter on this wall the way the compression law did not on Aldemir.</span></div>
-      <div class="f alert"><span class="t">Uniform grid, final: 0.854 × the test, and the model is stiff-then-weak</span><span class="b">139.4 kN at 0.50% against 163.3 measured; at 0.5% drift the model is 1.09 × the test envelope, at 1.5% it is 0.81 ×. No hardening and a toe that sheds to the bars at 0.6% against a test that keeps gaining to 1.5% on hardening and a confined boundary.</span></div>
+      <div class="f"><span class="t">Grid-objective (D107)</span><span class="b">Graded 25 mm (bars on nodes, 32,423 elements, 33.2 h) against uniform 30.5 (bars snapped, 22,002 elements, 13.3 h): peak 0.992 ×, matched-drift ratio 0.98–1.05 throughout, residual 0.6% vs 0.9%. The graded grid buys exact bar placement at 2.5 × the cost and changes no answer; the matrix can run on the uniform grid.</span></div>
+      <div class="f alert"><span class="t">Both grids, final: 0.85 × the test, and the model is stiff-then-weak</span><span class="b">139.4 kN at 0.50% against 163.3 measured; at 0.5% drift the model is 1.09 × the test envelope, at 1.5% it is 0.81 ×. No hardening and a toe that sheds to the bars at 0.6% against a test that keeps gaining to 1.5% on hardening and a confined boundary.</span></div>
       <div class="f alert"><span class="t">Early softening under axial load</span><span class="b">7% off the peak by 0.64% drift. First candidate: the compressed boundary element passes ε<sub>c0</sub> = 0.00276 early under 378 kN on a 102 mm wall, and Concrete02 softens to 0.2 f<sub>c</sub> while the real boundary is confined by hoops at 76 mm — no confined grade here (the D66 reasoning was written for a 150 mm wall). Sampled, not yet measured.</span></div>
       <div class="f"><span class="t">5% soft against the continuum, by construction</span><span class="b">The uniaxial-field balance pins E/(1−ν²); bending reads C<sub>11</sub>(1−ν<sub>eff</sub>²) with the lattice's own ν<sub>eff</sub> = 0.41. Recorded as a property of the method, not fitted — a property Aldemir's squat wall hid.</span></div>
       <div class="f"><span class="t">Bars on nodes without a common divisor (D104)</span><span class="b"><code>--grid rebar</code>: bar axes become grid lines, gaps fill at the target, horizon in index space, strut areas scale with tributary width. Costs 2.4 × the uniform grid per run; buys exact bar placement, not a different answer so far.</span></div>
@@ -270,7 +271,7 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
         <tr><td>SW-NC-FF</td><td>3.00</td><td class="dim">0.93 vs transformed</td><td>1.08 / 1.05 cyclic</td><td class="dim">plain bars — unfair</td></tr>
         <tr><td>WSH3</td><td>2.28</td><td class="dim">0.93 vs transformed</td><td>0.950 cyclic</td><td class="dim">deformed — fair</td></tr>
         <tr><td>Aldemir</td><td>0.75</td><td>0.999</td><td>0.997 push · 0.966 cyclic</td><td class="dim">not reported</td></tr>
-        <tr><td class="hi">RW2</td><td>3.00</td><td class="hi">0.951</td><td class="hi">0.854 push (uniform grid)</td><td class="dim">not reported</td></tr>
+        <tr><td class="hi">RW2</td><td>3.00</td><td class="hi">0.951</td><td class="hi">0.854 / 0.847 push (uniform / graded)</td><td class="dim">not reported</td></tr>
       </tbody></table></div>
   </section>
 

@@ -837,6 +837,11 @@ the thin-nonlinear-beam lattice instability, D34).
   window is Aldemir's T1 scale; on RW2 (T1 20 ms) it passed a release crest as a 148.5 kN peak —
   `StudySpec.peak_window_s` (RW2: 5 ms; Aldemir unchanged). Graded-grid twin running, same curve.
 
+- RW2 STAGE 1, GRADED TWIN (D107): **138.3 kN = 0.847x** at 0.52% drift, converged to 2.5% in 33.2 h;
+  graded/uniform 0.992 on peak and 0.98–1.05 at matched drift from 0.3 to 2.5%, so the baseline is
+  grid-objective (cf. D98). The bar-exact grid costs 2.5x and changes no answer: Stage 2 runs on the
+  uniform 30.5 grid, the graded grid stays the objectivity check. Stage 1 complete.
+
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its
 cyclic/gauge/replot/compare scripts; the WSH3 cyclic run itself (staged: `cyclic.py --drift 0.0102 --gf-factor 2`, and see the

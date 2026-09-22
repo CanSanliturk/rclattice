@@ -3392,3 +3392,35 @@ D92: a smoothing window is a time scale of the structure, not a constant.
 **Status:** accepted. Stage 1 half done (graded twin running, ETA 2026-09-22 morning). Next: the
 graded twin's finish (grid objectivity of peak and plateau), then a Stage 2 shaped for this
 specimen — f_y / b / ε_su and a confined boundary grade — priced before launch.
+
+### D107 — 2026-09-22 — RW2 Stage 1, graded-grid twin: 0.847x the measured, grid-objective to within 5% at every drift against the uniform grid; the bar-exact grid buys placement, not a different answer
+
+**The run.** `2026-09-20_174435_pushover_crushing-solved_perfect_d2.5pct`: the same baseline cell as
+D106 on the graded 25 mm grid (bars on nodes exactly, 7,446 nodes / 32,423 elements, dt 2.70 µs),
+driven to **2.5% drift, converged**, 4,395,484 steps in 33.2 h (37 steps/s over the run; ~30 on the
+cracked lattice mid-run). Launched before `peak_window_s` existed, so it was rescored at 5 ms.
+
+**Result and the comparison it was run for.** Peak **138.3 kN = 0.847x** the measured 163.3 at
+0.519% drift, plateau 0.450–0.533%, ascending-branch residual 0.6% of peak; ends at 116.9 kN =
+0.845 of peak at 2.5%, 80%-drop capacity not reached. Against the uniform-30.5 twin (D106: 139.4 kN
+at 0.497%, 116.7 kN at the end): **peak ratio 0.992**, and at matched drift the graded/uniform ratio
+is 1.003 / 0.991 / 1.054 / 1.026 / 1.022 / 0.981 / 1.002 at 0.3 / 0.5 / 0.75 / 1.0 / 1.5 / 2.0 /
+2.5% drift. The 0.6% step, the ~125 kN plateau and the late slide are all reproduced. So the RW2
+baseline is a property of the model, not of the discretization — the same verdict Aldemir's mesh
+25/50 pair returned (D98), now with a bar-exact grid on one side. The moment split across the base
+cut differs in its labels (graded: verticals 46 → 34%, rebar 35 → 44%, diagonals 19 → 22%; uniform:
+44 → 32 / 28 → 39 / 26–31%) because the cut sits at 12.5 mm in a 19 mm first row on one grid and at
+15.25 mm in a 30.5 mm row on the other; the shift of moment from concrete verticals to bars is the
+same 12 points on both.
+
+**Consequence.** The graded grid costs 2.5x the uniform 30.5 grid (33.2 vs 13.3 h) and changes no
+answer at this specimen's level of resolution; the Stage 2 cells run on the uniform grid, with the
+graded grid kept as the objectivity check on any cell whose result is to be quoted. D104's option
+stands as a capability, not a default.
+
+**Against the test, both grids agree:** 1.06–1.09x the envelope at 0.5% drift, 0.91x at 1.0%,
+0.81–0.82x at 1.5%. The reading of D106 — no hardening, an unconfined toe, and perfect bond where
+the test had strain penetration — is unchanged by the grid.
+
+**Status:** accepted. Stage 1 complete. A follow-on session has since launched Stage 2 cells on the
+uniform grid (`fy454`, `fy454 + sb0`, `linear + fy454`, to 1.5%); those are its to record.
