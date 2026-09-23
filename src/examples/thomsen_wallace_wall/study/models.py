@@ -31,6 +31,11 @@ def material_choice(params: dict):
     if comp not in ("linear", "crushing", "capped"):
         raise SystemExit(f"unknown comp {comp!r}")
     material = "concrete02" if comp == "crushing" else "aydin"
+    if material == "aydin" and params.get("analysis") == "cyclic":
+        # ElasticMultiLinear is path-independent: a cracked strut unloads down its own branch,
+        # so the wall comes out nonlinear-ELASTIC — single-valued loops, zero dissipation (D109)
+        raise SystemExit(f"comp={comp!r} is ElasticMultiLinear (path-independent, D60/D109): a "
+                         "cyclic run would dissipate nothing. Use --comp crushing.")
     cap = float(params["fc"]) * float(params["fcx"]) if comp == "capped" else None
     tail = params["tail"]
     if tail == "paper":

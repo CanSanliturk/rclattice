@@ -864,7 +864,7 @@ the thin-nonlinear-beam lattice instability, D34).
   NEED `comp=crushing`** (or a hysteretic concrete law): `linear`/`capped` are `ElasticMultiLinear`
   (D60, path-independent), and the first RW2 cyclic (`comp=linear`, killed at 0.3% drift, step 2.1M
   of 26.9M) came out single-valued — nonlinear elastic, zero dissipation, bars still elastic below
-  the ~0.45% yield drift. The harness does not refuse the combination yet. A crushing cyclic to 2%
+  the ~0.45% yield drift. The RW2 harness now REFUSES cyclic + linear/capped. A crushing cyclic to 2%
   on the uniform 30.5 grid is ~130 h at the measured Concrete02 rate.
 
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then

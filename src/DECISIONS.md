@@ -3549,3 +3549,8 @@ what the harness itself prints (0.146 h/mm × 893 mm of drive path).
 
 **Status:** accepted (feature + corrected semantics + the reading of a killed run). No new cyclic
 run launched in this entry — the cell and the drift target are the user's call.
+
+**Addendum (same day, user decision):** the guard now exists — `models.material_choice` refuses
+`--analysis cyclic` with `comp` `linear` or `capped` (SystemExit naming D60/D109); pushovers are
+unaffected. The cyclic run is `comp=crushing` to 2.0% drift, compared against the DIGITIZED TEST
+LOOPS rather than a new monotonic twin (user's choice), so no crushing/b 0.015/iso 0.02 push is run.
