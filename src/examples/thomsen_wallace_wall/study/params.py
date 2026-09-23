@@ -10,6 +10,8 @@ start, no legacy spellings), plus `grid` (D104), `field` (the calibration route,
 Stage 0) and `nu`.
 v2 (2026-09-22): `top_band` / `top_band_pitch` — the Fig. 9(a) dense top load-introduction band
 (D108), OFF by default so no v1 run changes.
+v3 (2026-09-23): `steel_iso` — Steel02 isotropic hardening (D109), OFF by default so the bar stays
+purely kinematic and no v1/v2 run changes. Only bites under reversals, i.e. cyclic runs.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from rclattice.study.registry import (Param, Registry, analysis_param, analysis_
                                       concrete_params, discretisation_params, failure_params,
                                       rebar_params, report_params)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 REGISTRY: tuple[Param, ...] = (
     analysis_param(),
@@ -54,6 +56,12 @@ REGISTRY: tuple[Param, ...] = (
     Param("fcx", "fcx", 1.0, "strut compressive-strength scale, `capped` only", "model", type=float),
     *failure_params(steel_b=0.01),
     Param("fy", "fy", 414.0, "steel yield in MPa (Table 1: the NOMINAL 60 ksi; coupons unprinted)",
+          "model", type=float),
+    Param("steel_iso", "iso", 0.0, "Steel02 ISOTROPIC hardening (D109): growth of BOTH yield "
+          "envelopes as a fraction of fy per unit accumulated plastic strain (sets a1 = a3, with "
+          "a2 = a4 = 1). 0 = off, the default, leaving the bar purely KINEMATIC. Only observable "
+          "under REVERSALS — it changes nothing in a monotonic pushover. Typical RC practice is "
+          "0.01-0.03; UNPRINTED for this specimen, so it is an assumption like steel_b",
           "model", type=float),
 
     # --- reinforcement ------------------------------------------------------------------------

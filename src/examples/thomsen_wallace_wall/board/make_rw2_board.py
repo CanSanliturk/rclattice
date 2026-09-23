@@ -16,7 +16,7 @@ NOW = datetime.datetime.now()
 T0 = datetime.datetime(2026, 9, 20, 17, 44, 35)
 TEST = 163.284
 STATE = {
-    "stamp_note": 'uniform run flat at ~124 kN through 1.28% drift; graded run at its peak region, 137.8 kN at 0.455%',
+    "stamp_note": 'NOW: hardening b = 0.015 (realistic Grade 60, vs the 0.01 low end), one-variable twin, 27% through. Tracks its b=0.01 sibling within ~1% so far - past yield it has only just begun to diverge, so the peak is not yet decided. PREVIOUS run finished: corrected f_y 414 + top band, 139.9 kN = 0.857 x test at 0.56%, residual 1.7%, converged to 2.0% - ON the crushing baseline (139.4), so neither the top band nor the compression law moved the peak.',
     "runs": [
         {"key": "uniform", "name": "uniform 30.5 mm grid", "sub": "bars snapped to the grid · grid-mode control",
          "elements": "4,961 nodes · 22,002 elements", "n": 2726277, "color": "var(--uni)",
@@ -25,6 +25,38 @@ STATE = {
          "elements": "7,446 nodes · 32,423 elements", "n": 4395483, "color": "var(--gra)",
          "samples": [(100000,0.0569,53.6,2830),(200000,0.1138,85.0,6235),(300000,0.1706,98.1,9602),(400000,0.2275,108.4,13121),(500000,0.2844,118.4,16748),(600000,0.3413,126.6,20006),(700000,0.3981,134.8,23436),(800000,0.455,137.8,26563),(900000,0.5119,138.2,29194),(1000000,0.5688,135.8,31776),(1100000,0.6256,135.5,34267),(1200000,0.6825,135.7,36780),(1300000,0.7394,135.5,39340),(1400000,0.7963,134.7,41846),(1500000,0.8531,129.3,44364),(1600000,0.91,129.1,46885),(1700000,0.9669,128.9,49130),(1800000,1.0238,128.9,51161),(1900000,1.0807,129.2,53138),(2000000,1.1375,127.4,55424),(2100000,1.1944,127.9,58510),(2200000,1.2513,127.9,61658),(2300000,1.3082,127.3,64848),(2400000,1.365,127.7,68049),(2500000,1.4219,127.0,71304),(2600000,1.4788,125.9,74545),(2700000,1.5357,126.5,77806),(2800000,1.5925,126.5,81180),(2900000,1.6494,125.7,84629),(3000000,1.7063,121.6,88064),(3100000,1.7632,121.4,91467),(3200000,1.82,121.0,94336),(3300000,1.8769,118.8,96382),(3400000,1.9338,119.9,98427),(3500000,1.9907,119.7,100476),(3600000,2.0476,120.1,102526),(3700000,2.1044,120.2,104579),(3800000,2.1613,120.1,106630),(3900000,2.2182,119.8,108681),(4000000,2.2751,119.1,110733),(4100000,2.3319,118.7,112771),(4200000,2.3888,117.3,114783),(4300000,2.4457,117.2,117120)]},
     ],
+}
+HARD = {
+    "key": "hardening", "name": "hardening b = 0.015 · f_y 414 · top band",
+    "sub": "one-variable twin of the finished run below — only the post-yield slope changes (0.01 → 0.015) · 2.0% target",
+    "elements": "4,961 nodes · 22,310 elements", "n": 2208031, "color": "var(--gra)",
+    "t0": datetime.datetime(2026, 9, 23, 8, 1, 45),
+    "samples": [(50000,0.0453,41.1,717),(100000,0.0906,70.4,1430),(150000,0.1359,86.0,2142),
+                (200000,0.1812,96.0,2854),(250000,0.2264,105.4,3566),(300000,0.2717,116.9,4279),
+                (350000,0.3170,120.7,4994),(400000,0.3623,127.0,5707),(450000,0.4076,133.6,6419),
+                (500000,0.4529,137.2,7131),(550000,0.4982,128.4,7843),(600000,0.5435,130.8,8554)],
+}
+LIN = {
+    "key": "linear", "name": "comp = linear · f_y 414 · top band",
+    "sub": "CORRECTED yield 414 (Table 1; 454 was Acun & Sucuoglu) + dense top-zone band 1000 mm · 2.0% target",
+    "elements": "4,961 nodes · 22,310 elements", "n": 2208031, "color": "var(--run)",
+    "peak": 139.9,
+    "t0": datetime.datetime(2026, 9, 22, 16, 44, 2),
+    "samples": [(50000,0.0453,42.2,738),(100000,0.0906,71.0,1471),(150000,0.1359,85.2,2204),
+                (200000,0.1812,95.9,2937),(250000,0.2264,105.5,3669),(300000,0.2717,113.4,4401),
+                (350000,0.3170,120.6,5133),(400000,0.3623,127.6,5866),(450000,0.4076,133.8,6599),
+                (500000,0.4529,137.0,7330),(550000,0.4982,138.7,8063),(600000,0.5435,139.7,8795),
+                (650000,0.5888,128.5,9527),(700000,0.6340,130.4,10259),(750000,0.6793,131.2,10992),
+                (800000,0.7246,131.7,11724),(850000,0.7699,132.3,12455),(900000,0.8152,133.0,13187),
+                (950000,0.8605,133.5,13918),(1000000,0.9058,133.8,14650),(1050000,0.9511,133.7,15381),
+                (1100000,0.9964,134.2,16113),(1150000,1.0417,134.4,16845),(1200000,1.0869,134.4,17637),
+                (1250000,1.1322,132.7,18370),(1300000,1.1775,134.1,19101),(1350000,1.2228,134.6,19833),
+                (1400000,1.2681,135.1,20565),(1450000,1.3134,135.7,21296),(1500000,1.3587,135.0,22028),
+                (1550000,1.4040,135.8,22760),(1600000,1.4493,136.5,23492),(1650000,1.4945,136.2,24224),
+                (1700000,1.5398,136.4,24956),(1750000,1.5851,136.4,25688),(1800000,1.6304,136.2,26420),
+                (1850000,1.6757,125.9,27152),(1900000,1.7210,128.4,27885),(1950000,1.7663,129.3,28618),
+                (2000000,1.8116,129.7,29349),(2050000,1.8569,129.2,30081),(2100000,1.9021,129.7,30813),
+                (2150000,1.9474,129.0,31545),(2200000,1.9927,129.7,32277)],
 }
 el = (NOW - T0).total_seconds()
 
@@ -65,22 +97,28 @@ def run_block(r):
     if r["key"] in FIN:
         return finished_block(r, FIN[r["key"]])
     i, d, v, t = r["samples"][-1]; rate = i / t; total_h = r["n"] / rate / 3600
-    pct = min(100, (i + rate * (el - t)) / r["n"] * 100); eta = T0 + datetime.timedelta(hours=total_h)
+    t0 = r.get("t0", T0); elr = (NOW - t0).total_seconds()
+    pct = min(100, (i + rate * (elr - t)) / r["n"] * 100); eta = t0 + datetime.timedelta(hours=total_h)
     peak = max(s[2] for s in r["samples"]); pk_d = [s[1] for s in r["samples"] if s[2] == peak][0]
+    done = i >= r["n"] * 0.99
+    chip = '<span class="chip ok"><i></i>finished</span>' if done else '<span class="chip live"><i></i>running</span>'
+    pk_peak, pk_lbl = (r.get("peak", peak), "peak, 5 ms") if done else (peak, "peak so far")
+    fin_time = f'{total_h:.1f} h' if done else f'{eta:%a %H:%M}'
+    fin_lbl = "elapsed" if done else "eta"
     rows = "".join(f"<tr><td>{s[1]:.3f}%</td><td>{s[2]:.1f}</td><td>{s[2]/TEST:.3f}</td>"
                    f"<td class='dim'>{s[0]//1000:,}k</td></tr>" for s in r["samples"])
     return f'''
     <article class="run" style="--c:{r['color']}">
       <header class="run-h">
         <div><div class="run-name">{r['name']}</div><div class="run-sub">{r['sub']} · {r['elements']}</div></div>
-        <span class="chip live"><i></i>running</span>
+        {chip}
       </header>
-      <div class="bar"><div class="fill" style="width:{pct:.1f}%"></div></div>
+      <div class="bar"><div class="fill" style="width:{100 if done else pct:.1f}%"></div></div>
       <dl class="kv">
-        <div><dt>progress</dt><dd>{pct:.0f}% · step {i:,} of {r['n']:,}</dd></div>
+        <div><dt>progress</dt><dd>{100 if done else pct:.0f}% · step {i:,} of {r['n']:,}</dd></div>
         <div><dt>rate</dt><dd>{rate:.0f} steps/s</dd></div>
-        <div><dt>eta</dt><dd>{eta:%a %H:%M}</dd></div>
-        <div><dt>peak so far</dt><dd>{peak:.1f} kN · {peak/TEST:.3f} × test · at {pk_d:.2f}%</dd></div>
+        <div><dt>{fin_lbl}</dt><dd>{fin_time}</dd></div>
+        <div><dt>{pk_lbl}</dt><dd>{pk_peak:.1f} kN · {pk_peak/TEST:.3f} × test · at {pk_d:.2f}%</dd></div>
       </dl>
       <div class="scroll"><table><thead><tr><th>drift</th><th>base shear kN</th><th>/ test</th><th>step</th></tr></thead><tbody>{rows}</tbody></table></div>
     </article>'''
@@ -187,7 +225,7 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
       <div class="tile"><span class="k">graded 25 · finished</span><span class="v">{FIN['graded']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['graded']['peak']:.1f} kN at {FIN['graded']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
       <div class="tile test"><span class="k">measured · Aydin</span><span class="v">163.3</span><span class="s">kN, Table 4 · Aydin's own lattice 1.040 ×</span></div>
     </div>
-    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. Both runs are finished and scored from their stored series (5 ms smoothing — T1 is 20 ms here, D106). Nothing is running.</p>
+    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. Both runs are finished and scored from their stored series (5 ms smoothing — T1 is 20 ms here, D106). A third cell — <b>comp = linear · f<sub>y</sub> 454</b> — is now stepping to 2% drift (below).</p>
   </section>
 
   <section class="sect">
@@ -202,6 +240,10 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
 
   <section class="sect">
     <h2>Runs</h2>
+    {run_block(HARD)}
+    <p><b>Why hardening next.</b> With f<sub>y</sub> corrected to 414, the top band and the compression law both washed out (139.9 vs 139.4 kN) — so peak is left to f<sub>y</sub>-coupon, <b>hardening</b> and confinement. b = 0.01 is the low end for Grade 60; 0.015 is the realistic central value (f<sub>u</sub>/f<sub>y</sub> ≈ 1.55 at 10% strain). RW2's measured peak sits at ~1.5% drift, deep in the bars' strain-hardening range, so unlike squat Aldemir (where b moved capacity but not peak, D101) this should lift the peak here.</p>
+    {run_block(LIN)}
+    <p><b>What this cell settled.</b> Run at RW2's <b>correct</b> f<sub>y</sub> = 414 (Table 1; the earlier 0.900 × came from f<sub>y</sub> 454, which is Acun &amp; Sucuoglu's specimen, not RW2) plus the dense top-zone band, it peaks at <b>139.9 kN = 0.857 ×</b> — right <b>on</b> the crushing/f<sub>y</sub>414 baseline (139.4). Two things fall out: the <b>top band does not lift the peak</b> (load-introduction, not base flexure — as predicted), and <b>comp = linear equals crushing</b> at fixed f<sub>y</sub> (D87). The gap to the test is now cleanly f<sub>y</sub>-coupon + hardening + confinement, not the compression law. Reaches 72 mm at ~130 kN = 0.79 ×.</p>
     {run_block(uni)}
     {run_block(gra)}
   </section>
@@ -245,7 +287,7 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
     <div class="plan">
       <div class="step"><span class="n">stage 0</span><span class="w">Elastic gates<small>continuum, cantilever, both calibration fields, both grids</small></span><span class="chip ok"><i></i>done</span></div>
       <div class="step"><span class="n">stage 1</span><span class="w">Baseline pushover to 2.5%<small>crushing / solved / perfect — uniform 0.854 ×, graded 0.847 ×; grid-objective to 5% at every drift</small></span><span class="chip ok"><i></i>done</span></div>
-      <div class="step"><span class="n">stage 2</span><span class="w">The matrix<small>compression law × tension tail; priced, parallel</small></span><span class="chip todo">next</span></div>
+      <div class="step"><span class="n">stage 2</span><span class="w">The matrix<small>compression law × tension tail; comp = linear · f<sub>y</sub> 454 firing to 2% now</small></span><span class="chip live"><i></i>running</span></div>
       <div class="step"><span class="n">stage 3</span><span class="w">Failure model<small>--steel-rupture × --concrete-residual 0, then b × ε<sub>su</sub>; likely also f<sub>y</sub> and a confined boundary grade</small></span><span class="chip todo">queued</span></div>
       <div class="step"><span class="n">stage 4</span><span class="w">Cyclic<small>on the cell that reproduces the monotonic peak; levels invented, said so</small></span><span class="chip todo">queued</span></div>
     </div>

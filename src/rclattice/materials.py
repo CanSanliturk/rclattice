@@ -117,8 +117,16 @@ def concrete_uniaxial_nonlinear(grade: ConcreteGrade, tag: int) -> UniaxialMater
 
 
 def steel_uniaxial(grade: SteelGrade, tag: int) -> UniaxialMaterial:
-    """Uniaxial Steel02 for rebar struts (D19). Args: (Fy, E0, b, R0, cR1, cR2)."""
-    return UniaxialMaterial(tag, "Steel02", (grade.fy, grade.E0, grade.b, grade.R0, grade.cR1, grade.cR2))
+    """Uniaxial Steel02 for rebar struts (D19). Args: (Fy, E0, b, R0, cR1, cR2[, a1, a2, a3, a4]).
+
+    The `a1..a4` ISOTROPIC-hardening tail is emitted ONLY when the grade asks for it
+    (`grade.isotropic`, D109), so a kinematic-only grade produces the exact six-argument call every
+    run before this change used — nothing existing moves.
+    """
+    args = (grade.fy, grade.E0, grade.b, grade.R0, grade.cR1, grade.cR2)
+    if grade.isotropic:
+        args = args + (grade.a1, grade.a2, grade.a3, grade.a4)
+    return UniaxialMaterial(tag, "Steel02", args)
 
 
 def steel_uniaxial_ruptured(grade: SteelGrade, tag: int, *, eps_rupture: float) -> list:

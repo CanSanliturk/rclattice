@@ -46,6 +46,21 @@ class SteelGrade:
 
     `fy, E0, b` are the bilinear backbone; `R0, cR1, cR2` shape the elastic-plastic transition
     (Steel02 defaults). Reuse Steel01's exact match by setting a large R0 if ever needed.
+
+    ISOTROPIC HARDENING (`a1..a4`, D109) is OPTIONAL and OFF by default. With `a1 = a3 = 0` the
+    material is purely KINEMATIC: the yield surface translates, the elastic range keeps its width
+    2*fy, and only the Bauschinger curvature (R0/cR1/cR2) shapes reversals. Setting `a1`/`a3`
+    grows the compression/tension yield envelope in proportion to accumulated plastic strain, so
+    repeated large cycles gain strength the way real bars do.
+
+      * `a1` — compression envelope growth, as a fraction of fy, after a plastic strain `a2*fy/E0`
+      * `a3` — tension envelope growth, same form, after `a4*fy/E0`
+
+    ONLY OBSERVABLE UNDER REVERSALS: a monotonic push never computes a new yield asymptote, so
+    these change nothing in a pushover. They matter for cyclic runs, where a kinematic-only bar
+    under-predicts the strength of late, large-amplitude cycles. Typical RC practice is
+    `a1 = a3 ~ 0.01-0.03` with `a2 = a4 = 1.0`; the value is an ASSUMPTION unless a source prints
+    it, so every run records it.
     """
 
     name: str
@@ -55,6 +70,15 @@ class SteelGrade:
     R0: float = 18.0
     cR1: float = 0.925
     cR2: float = 0.15
+    a1: float = 0.0
+    a2: float = 1.0
+    a3: float = 0.0
+    a4: float = 1.0
+
+    @property
+    def isotropic(self) -> bool:
+        """True when either envelope actually grows — i.e. Steel02 needs its `a1..a4` tail."""
+        return self.a1 != 0.0 or self.a3 != 0.0
 
 
 @dataclass

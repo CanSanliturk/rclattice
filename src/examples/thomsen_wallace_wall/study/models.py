@@ -79,6 +79,13 @@ def apply_material_overrides(params: dict) -> dict | None:
     if fy != specimen.STEEL.fy:
         specimen.STEEL = dataclasses.replace(specimen.STEEL, name=f"Gr-fy{fy:g}", fy=fy)
         out["fy"] = [414.0, fy]
+    iso = float(params.get("steel_iso", 0.0))
+    if iso != 0.0:
+        # a1 = a3 = iso grows BOTH envelopes equally; a2 = a4 = 1 keeps the reference plastic
+        # strain at fy/E0. Purely kinematic when iso == 0, which is the default (D109).
+        specimen.STEEL = dataclasses.replace(
+            specimen.STEEL, name=f"{specimen.STEEL.name}-iso{iso:g}", a1=iso, a3=iso)
+        out["steel_iso"] = [0.0, iso]
     return out or None
 
 
@@ -120,6 +127,7 @@ def build(params: dict):
         "steel_rupture": float(params["steel_rupture"]) or None,
         "concrete_residual": float(params["concrete_residual"]),
         "steel_b": float(params["steel_b"]),
+        "steel_iso": float(params.get("steel_iso", 0.0)),
         "top_band_mm": float(params["top_band"]),
         "top_band_pitch_mm": float(params["top_band_pitch"]),
         "gf_factor": gff,
