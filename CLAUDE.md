@@ -855,6 +855,18 @@ the thin-nonlinear-beam lattice instability, D34).
   (elastic compression never crushes). It would reach the test's 1.97%/72 mm trivially but at ~144 kN
   = 0.88x: the displacement, not the force. Peak stays a base-flexural quantity (coupon f_y / b / mesh).
 
+- RW2 `--steel-iso` + THE CYCLIC TRAP (D109): Steel02 isotropic hardening as an opt-in axis
+  (`SteelGrade.a1..a4`, default off — the six-argument Steel02 call is unchanged; RW2 schema v3).
+  MEASURED on one strut: Steel02 resets the asymptote to `fy*(1 + a3*d^0.8)` at EVERY strain
+  reversal, `d` = strain RANGE / (2 eps_y) — so ONE ringing-sized reversal lifts a pushover's bar
+  4.4%, an elastic-range reversal already gives +a3, and +/-10 eps_y cycles saturate at 1.10x.
+  It is NOT inert in an explicit pushover: give any monotonic twin the same value. **CYCLIC RUNS
+  NEED `comp=crushing`** (or a hysteretic concrete law): `linear`/`capped` are `ElasticMultiLinear`
+  (D60, path-independent), and the first RW2 cyclic (`comp=linear`, killed at 0.3% drift, step 2.1M
+  of 26.9M) came out single-valued — nonlinear elastic, zero dissipation, bars still elastic below
+  the ~0.45% yield drift. The harness does not refuse the combination yet. A crushing cyclic to 2%
+  on the uniform 30.5 grid is ~130 h at the measured Concrete02 rate.
+
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its
 cyclic/gauge/replot/compare scripts; the WSH3 cyclic run itself (staged: `cyclic.py --drift 0.0102 --gf-factor 2`, and see the

@@ -106,7 +106,7 @@ SOURCES = {
     "steel_rupture": ("assumed", "not printed; decides capacity (D97/D102)"),
     "concrete_residual": ("assumed", "D91: the model has no capacity until this is lowered"),
     "steel_b": ("assumed", "not printed; the largest control on capacity (D101/D102)"),
-    "steel_iso": ("assumed", "not printed; isotropic hardening, only bites under reversals (D109)"),
+    "steel_iso": ("assumed", "not printed; isotropic hardening, acts at every strain reversal (D109)"),
     "rate": ("assumed", "the repo's cross-study drive speed; the licence is the residual (D64)"),
     "damping": ("assumed", "damping is the knob that matters, not rate (D64)"),
     "proto": ("assumed", "levels invented; the test's are not printed"),

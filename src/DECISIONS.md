@@ -3484,3 +3484,68 @@ and top-tearing robustness. No FE run of the band, and no comp=linear push to 1.
 **Status:** accepted (feature + the reading of a finished run). Feature is example-layer + RW2 study
 only; the shared harness (`rclattice/study/`) is untouched, so Aldemir and other studies are
 unaffected. Tests unaffected (none pin the RW2 schema).
+
+### D109 — 2026-09-23 — Steel02 isotropic hardening as an opt-in axis (`--steel-iso`); it acts at EVERY strain reversal, so it is not inert in an explicit pushover. And the first RW2 cyclic run was killed at 0.3% drift because `comp=linear` struts are path-independent: the loops were single-valued and dissipated nothing
+
+**The feature (opt-in, nothing default changes).** `SteelGrade` gains Steel02's isotropic-hardening
+tail `a1..a4` (default `a1 = a3 = 0`, `a2 = a4 = 1`) and an `isotropic` property;
+`materials.steel_uniaxial` appends the four values ONLY when `grade.isotropic`, so every existing
+grade still emits the identical six-argument call (checked: `(414, 2e5, 0.015, 18, 0.925, 0.15)`
+by default, ten arguments with `a1 = a3 = 0.02`; OpenSees accepts both). RW2 study: `steel_iso`
+(code `iso`, registry schema v2 → v3) sets `a1 = a3`; threaded through `models.apply_material_overrides`
+/ `build`, `study_spec` sources / title / `variant_keys` / `cross_run_axes`. Committed as 47fe250.
+The value is UNPRINTED for RW2 (as for every specimen here), so it is an assumption like `steel_b`.
+
+**What Steel02 actually computes — measured on one strut, correcting the first docstrings.** The
+commit described the parameter as envelope growth "per unit accumulated plastic strain" that
+"changes nothing in a monotonic pushover". A single-material probe (`fy` 414, `b` 0.015, iso 0.02)
+says otherwise. At every strain REVERSAL Steel02 resets the yield asymptote to
+`fy*(1 + a3*d^0.8)` (tension; `a1`/`a2` for compression), `d = (eps_max - eps_min)/(2*a4*eps_y)`:
+
+  * **strictly monotonic path: ratio 1.0000** at 5.5 / 10 / 20 eps_y — inert, as claimed;
+  * **one reversal of 0.05 eps_y** (~1e-4 strain, ringing-sized) at 5 eps_y: **+4.4%** at 5.5 eps_y,
+    still +3.7% at 20 eps_y — the rest of the push carries it;
+  * **one reversal still inside the elastic range** (0.5 eps_y): **+1.8%**, because the elastic
+    range alone gives `d = 1/a4 = 1`, i.e. a shift of `a3` before any plastic strain exists;
+  * **+/-10 eps_y cycles:** tips **1.104x** kinematic on cycle 1 and **1.102x** on cycles 2 and 3 —
+    it SATURATES, because it tracks the strain RANGE, not cycle count or accumulated plastic strain.
+
+So iso is inert only on a strictly monotonic strain path, which the explicit dynamic-relaxation
+runners do not produce: crack-release ringing reverses bar strains (D106's crest was 9 ms long).
+A monotonic twin of an iso cyclic run must carry the SAME `--steel-iso`. At RW2's large levels
+(bars at ~10-15 eps_y) iso 0.02 is worth ~+10% of bar stress, and in a flexure-controlled wall
+that is most of the same on base shear — a lever in the direction of the 0.857x gap, but an
+assumed one. The docstrings (`problem.SteelGrade`, `params.steel_iso`, `study_spec.SOURCES`) are
+corrected in the same commit as this entry.
+
+**The killed cyclic run** (`2026-09-23_141950_cyclic_linear-solved_perfect_guniform_m30.5_sb0.015_iso0.02_tb1000_d2pct_protoladder`).
+`--proto ladder --drift 0.02 --cycles 1 --comp linear`, f_y 414, b 0.015, iso 0.02, top band 1000,
+uniform 30.5 (4,961 nodes / 22,310 elements, dt 4.354 us): 8 invented levels 0.1 / 0.2 / 0.3 / 0.4 /
+0.6 / 1.0 / 1.5 / 2.0% drift, 26,937,977 steps. Killed by the user at step 2,100,000 (7.8%, 9.2 h),
+in the negative half of the 0.3% level. **The force-deformation was single-valued**: at +0.25%
+drift the loading branch read 110.1 kN and the unloading branch 111.0 kN at +0.26%; at +0.20% /
++0.215%, 99.7 / 102.6 kN; the second visit to -0.10% read -74.9 kN against -75.5 kN on the first;
+the curve crossed zero drift at zero force every time. A nonlinear-ELASTIC wall: no dissipation,
+no residual drift, no stiffness degradation between cycles.
+
+**Why — and it is not new.** `comp=linear` (and `comp=capped`) map to `material="aydin"` →
+`materials.concrete_lattice_aydin`, an `ElasticMultiLinear`: stress is a pure function of strain,
+so a cracked strut unloads down its own softening branch and returns to zero at zero strain. D60
+already said "no damage memory — NOT for cyclic work", and `concrete_lattice_aydin_cyclic`
+(`HystereticSM`) exists because of it. The bars (Steel02) are hysteretic, but RW2 yields at ~0.45%
+drift, so at 0.3% nothing in the model could dissipate. The run was the wrong cell, not a
+numerical failure. **RULE: a cyclic run needs `comp=crushing` (Concrete02) or a hysteretic
+concrete law; `linear` and `capped` are monotonic-only.** The harness does not yet refuse the
+combination.
+
+**Choosing the cyclic cell.** On RW2 the compression law does not move the PEAK (139.9 kN linear
+vs 139.4 crushing at f_y 414, b 0.01, D106/D108) but it does move the late branch: crushing slides
+to ~120 kN at 2.0% where linear holds ~130 (the crushing run has no top band, which D108 found
+does not move the peak). There is no finished monotonic twin of
+`crushing / b 0.015 / iso 0.02 / tb1000` — the b 0.015 push (140.0 kN, flat top from 1.85% to its
+2.0% target, so a lower bound) is `comp=linear`. Cost at the MEASURED Concrete02 rate on this grid
+(57 steps/s over D106's whole run, against 68 for `linear`): 26.9M steps ≈ **130 h**, which is also
+what the harness itself prints (0.146 h/mm × 893 mm of drive path).
+
+**Status:** accepted (feature + corrected semantics + the reading of a killed run). No new cyclic
+run launched in this entry — the cell and the drift target are the user's call.

@@ -11,7 +11,8 @@ Stage 0) and `nu`.
 v2 (2026-09-22): `top_band` / `top_band_pitch` — the Fig. 9(a) dense top load-introduction band
 (D108), OFF by default so no v1 run changes.
 v3 (2026-09-23): `steel_iso` — Steel02 isotropic hardening (D109), OFF by default so the bar stays
-purely kinematic and no v1/v2 run changes. Only bites under reversals, i.e. cyclic runs.
+purely kinematic and no v1/v2 run changes. Acts at strain REVERSALS — cyclic runs, and the ringing
+of an explicit pushover too (D109).
 """
 from __future__ import annotations
 
@@ -57,11 +58,12 @@ REGISTRY: tuple[Param, ...] = (
     *failure_params(steel_b=0.01),
     Param("fy", "fy", 414.0, "steel yield in MPa (Table 1: the NOMINAL 60 ksi; coupons unprinted)",
           "model", type=float),
-    Param("steel_iso", "iso", 0.0, "Steel02 ISOTROPIC hardening (D109): growth of BOTH yield "
-          "envelopes as a fraction of fy per unit accumulated plastic strain (sets a1 = a3, with "
-          "a2 = a4 = 1). 0 = off, the default, leaving the bar purely KINEMATIC. Only observable "
-          "under REVERSALS — it changes nothing in a monotonic pushover. Typical RC practice is "
-          "0.01-0.03; UNPRINTED for this specimen, so it is an assumption like steel_b",
+    Param("steel_iso", "iso", 0.0, "Steel02 ISOTROPIC hardening (D109): sets a1 = a3 (a2 = a4 = 1); "
+          "at each strain reversal the yield asymptote becomes fy*(1 + iso*d^0.8), d = strain RANGE "
+          "/ (2 eps_y), so ANY reversal already gives +iso and +/-10 eps_y cycles give ~1.10x. "
+          "0 = off, the default, leaving the bar purely KINEMATIC. Inert only on a strictly "
+          "monotonic strain path — explicit pushovers ring, so give a monotonic twin the same "
+          "value. UNPRINTED for this specimen, an assumption like steel_b",
           "model", type=float),
 
     # --- reinforcement ------------------------------------------------------------------------

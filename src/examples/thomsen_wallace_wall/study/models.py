@@ -82,7 +82,7 @@ def apply_material_overrides(params: dict) -> dict | None:
     iso = float(params.get("steel_iso", 0.0))
     if iso != 0.0:
         # a1 = a3 = iso grows BOTH envelopes equally; a2 = a4 = 1 keeps the reference plastic
-        # strain at fy/E0. Purely kinematic when iso == 0, which is the default (D109).
+        # range at 2*fy/E0. Purely kinematic when iso == 0, which is the default (D109).
         specimen.STEEL = dataclasses.replace(
             specimen.STEEL, name=f"{specimen.STEEL.name}-iso{iso:g}", a1=iso, a3=iso)
         out["steel_iso"] = [0.0, iso]

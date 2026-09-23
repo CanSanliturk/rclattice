@@ -50,17 +50,25 @@ class SteelGrade:
     ISOTROPIC HARDENING (`a1..a4`, D109) is OPTIONAL and OFF by default. With `a1 = a3 = 0` the
     material is purely KINEMATIC: the yield surface translates, the elastic range keeps its width
     2*fy, and only the Bauschinger curvature (R0/cR1/cR2) shapes reversals. Setting `a1`/`a3`
-    grows the compression/tension yield envelope in proportion to accumulated plastic strain, so
-    repeated large cycles gain strength the way real bars do.
+    shifts the compression/tension yield ASYMPTOTE by a factor that grows with the STRAIN RANGE
+    seen so far — not with accumulated plastic strain.
 
-      * `a1` — compression envelope growth, as a fraction of fy, after a plastic strain `a2*fy/E0`
-      * `a3` — tension envelope growth, same form, after `a4*fy/E0`
+    WHAT Steel02 ACTUALLY COMPUTES (measured on one strut, D109). At every strain REVERSAL it
+    resets the asymptote to `fy * (1 + a3 * d**0.8)` (tension; `a1`/`a2` on the compression side)
+    with `d = (eps_max - eps_min) / (2 * a4 * fy/E0)`. Three consequences:
 
-    ONLY OBSERVABLE UNDER REVERSALS: a monotonic push never computes a new yield asymptote, so
-    these change nothing in a pushover. They matter for cyclic runs, where a kinematic-only bar
-    under-predicts the strength of late, large-amplitude cycles. Typical RC practice is
-    `a1 = a3 ~ 0.01-0.03` with `a2 = a4 = 1.0`; the value is an ASSUMPTION unless a source prints
-    it, so every run records it.
+      * the ELASTIC range alone gives `d = 1/a4`, so with `a4 = 1` the very first reversal — even
+        one that never left the elastic range — already lifts the asymptote by `a3` (+1.8% at
+        `a3 = 0.02`, measured);
+      * it depends on the RANGE, not on cycle count: repeated cycles at one amplitude saturate
+        after the first (+/-10 eps_y: tips 1.10x kinematic on cycles 1, 2 and 3 alike);
+      * it is inert ONLY on a strictly monotonic strain path. Under the EXPLICIT dynamic-relaxation
+        runners a pushover's bars ring, and ONE reversal of 0.05*eps_y at 5*eps_y raises the bar's
+        stress 4.4% for the rest of the push. So a pushover is not a guaranteed iso-free twin; give
+        a monotonic comparison the same `a1..a4` as the cyclic run it is compared against.
+
+    The value is an ASSUMPTION for every specimen in this repo (none prints it), so every run
+    records it.
     """
 
     name: str
