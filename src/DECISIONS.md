@@ -3554,3 +3554,36 @@ run launched in this entry — the cell and the drift target are the user's call
 `--analysis cyclic` with `comp` `linear` or `capped` (SystemExit naming D60/D109); pushovers are
 unaffected. The cyclic run is `comp=crushing` to 2.0% drift, compared against the DIGITIZED TEST
 LOOPS rather than a new monotonic twin (user's choice), so no crushing/b 0.015/iso 0.02 push is run.
+
+### D110 — 2026-09-23 — The matched-displacement table reads RINGING on explicit pushovers: "+6.0% at 58.6 mm" from b = 0.015 was a crest; smoothed, the hardening twins agree to 1% until b = 0.01 steps down at ~1.68%. Fourth instance of D92's class
+
+**The defect.** `ReferenceSet.comparison_points` reduces the model side to the MAXIMUM raw shear within
+±1% of the run's peak displacement of each target (±0.73 mm on RW2 at 2% drift). That window is
+~22k explicit steps ≈ 95 ms ≈ 5 T1 periods, so on a ringing explicit pushover it returns a crest,
+not resistance. The window was written for CYCLIC runs, where "the shear at u" is an envelope; on a
+monotonic push it was documented to "return that point", which is only true without ringing.
+
+**What it got wrong.** The two finished hardening twins (`comp=linear`, f_y 414, top band,
+b 0.01 / 0.015). Their reports gave 142.1 / 150.6 kN at 58.56 mm, i.e. **+6.0%** and b = 0.015 at
+**0.957x** the test envelope. On the 5 ms smoothed series (the same moving average that reproduces
+each run's recorded `peak_shear_smooth` to 1e-9: 139.857 / 140.002 kN), matched displacement reads:
+
+| u (mm) | drift | test env. | b = 0.01 | b = 0.015 | b.015 / b.01 |
+|---|---|---|---|---|---|
+| 14.6 | 0.40% | 126.4 | 132.4 | 132.5 | 1.000 |
+| 29.3 | 0.80% | 141.2 | 132.8 | 133.8 | 1.008 |
+| 43.9 | 1.20% | 151.5 | 134.4 | 135.9 | 1.011 |
+| 58.6 | 1.60% | 157.1 | 136.5 | 135.2 | **0.991** |
+| 65.9 | 1.80% | 163.3 | 129.6 | 138.2 | 1.066 |
+| 72.0 | 1.97% | — | 129.4 | 139.8 | 1.080 |
+
+So hardening b 0.01 → 0.015 is worth ~1% from 0.8% to 1.6% drift and **+6.6 / +8.0%** only after
+the b = 0.01 run steps down at ~1.68% (136 → 126 kN) and the b = 0.015 run does not. The late-gain
+half of the old finding survives (+7.7% at 73.2 mm then, +8.0% at 72.0 mm now); the 58.6 mm half and
+the 0.957x do not (smoothed: 0.861x). The run board and the live force–deformation doc carried the
+wrong numbers and now carry an explicit correction.
+
+**Status:** defect recorded, NOT yet fixed in the harness. The fix is to feed the comparison the
+smoothed series (`StudySpec.peak_window_s`) on monotonic runs — and on cyclic runs, the envelope of
+the smoothed series — then rescore; every RW2 matched-displacement table and the Aldemir ones
+(1 ms window, D92) need re-reading after it.

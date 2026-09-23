@@ -16,7 +16,7 @@ NOW = datetime.datetime.now()
 T0 = datetime.datetime(2026, 9, 20, 17, 44, 35)
 TEST = 163.284
 STATE = {
-    "stamp_note": 'NOW: hardening b = 0.015 (realistic Grade 60, vs the 0.01 low end), one-variable twin, 27% through. Tracks its b=0.01 sibling within ~1% so far - past yield it has only just begun to diverge, so the peak is not yet decided. PREVIOUS run finished: corrected f_y 414 + top band, 139.9 kN = 0.857 x test at 0.56%, residual 1.7%, converged to 2.0% - ON the crushing baseline (139.4), so neither the top band nor the compression law moved the peak.',
+    "stamp_note": 'NOW: cyclic ladder to 2.0% drift on comp = crushing (Concrete02), launched 23:47, ~130 h. The first cyclic attempt (comp = linear) was killed at 0.3%: ElasticMultiLinear struts made the wall nonlinear-elastic, zero dissipation (D109). Both hardening pushovers finished: equal 0.857x peaks, but b = 0.015 carries +6.0% at 58.6 mm and +7.7% at 73.2 mm.',
     "runs": [
         {"key": "uniform", "name": "uniform 30.5 mm grid", "sub": "bars snapped to the grid · grid-mode control",
          "elements": "4,961 nodes · 22,002 elements", "n": 2726277, "color": "var(--uni)",
@@ -62,6 +62,59 @@ el = (NOW - T0).total_seconds()
 
 FIN = json.load(open(OUT / "rw2_finished.json")) if (OUT / "rw2_finished.json").exists() else {}
 
+# --- the RUNNING job, read straight from its console log every tick (no hand-copied samples) ------
+import re
+STUDY = SC.parents[1] / "output" / "thomsen_wallace_wall" / "study"
+SAMPLE_RE = re.compile(r"step\s+([\d,]+)/([\d,]+)\s+drift\s+([+-][\d.]+)%\s+shear\s+([+-][\d.]+) kN\s+\[\s*(\d+)s\]")
+H_MM = 3660.0
+
+def console(pattern):
+    d = sorted(STUDY.glob(pattern))[-1]
+    txt = (d / "console.log").read_text()
+    m = SAMPLE_RE.findall(txt)
+    s = [(int(a.replace(",", "")), float(c), float(v), int(t)) for a, n, c, v, t in m]
+    n = int(m[0][1].replace(",", "")) if m else None
+    return d, s, n
+
+CYC = {"key": "cyclic", "name": "cyclic ladder to 2.0% · comp = crushing (Concrete02)",
+       "sub": "b = 0.015 · isotropic a1 = a3 = 0.02 · f<sub>y</sub> 414 · top band 1000 · uniform 30.5 · "
+              "8 invented levels 0.1 / 0.2 / 0.3 / 0.4 / 0.6 / 1.0 / 1.5 / 2.0% drift, 1 cycle each",
+       "elements": "4,961 nodes · 22,310 elements", "color": "var(--cyc)",
+       "glob": "2026-09-23_234740_cyclic_crushing*"}
+CYC["dir"], CYC["samples"], CYC["n"] = console(CYC["glob"])
+CYC["t0"] = datetime.datetime.strptime(CYC["dir"].name[:17], "%Y-%m-%d_%H%M%S")
+CYC["done"] = (CYC["dir"] / "data.json").exists()
+CYC["alive"] = (NOW.timestamp() - (CYC["dir"] / "console.log").stat().st_mtime) < 1800
+
+# the two finished hardening pushovers: full series from their own logs, smoothed peaks from report.md
+for _r, _pat in ((HARD, "2026-09-23_080145_pushover*"), (LIN, "2026-09-22_164402_pushover*")):
+    _, _r["samples"], _r["n"] = console(_pat)
+HARD.update(color="var(--b15)", peak=140.0, peak_drift=1.99,
+            sub="one-variable twin of the b = 0.01 run below — only the post-yield slope changes · 2.0% target · "
+                "peak on a flat top 1.85–2.00% that ends AT the target, so a LOWER BOUND")
+LIN.update(peak_drift=0.56)
+
+def env_at(d_pct):
+    """Test envelope (rw2_ref.json `env`, both signs) interpolated at a signed drift."""
+    pts = sorted(p for p in REF["env"] if (p[0] > 0) == (d_pct > 0))
+    xs = [abs(p[0]) for p in pts]; ys = [abs(p[1]) for p in pts]; x = abs(d_pct)
+    if not xs or x < xs[0] or x > xs[-1]:
+        return None
+    for i in range(1, len(xs)):
+        if xs[i] >= x:
+            f = (x - xs[i-1]) / ((xs[i] - xs[i-1]) or 1)
+            return ys[i-1] + f * (ys[i] - ys[i-1])
+    return ys[-1]
+
+def tips(samples):
+    """Sampled loop tips: local extrema of drift in the 50k-step console samples (±0.045% of the true reversal)."""
+    out = []
+    for k in range(1, len(samples) - 1):
+        a, b, c = samples[k-1][1], samples[k][1], samples[k+1][1]
+        if (b > a and b >= c and b > 0) or (b < a and b <= c and b < 0):
+            out.append(samples[k])
+    return out
+
 def finished_block(r, f):
     cmp_rows = "".join(f"<tr><td>{c['at_mm']:.1f} mm · {c['at_mm']/36.6:.2f}%</td><td>{c['model_kN']:.1f}</td>"
                        f"<td>{(c.get('test_envelope_kN') or float('nan')):.1f}</td><td>{(c.get('model_over_test') or float('nan')):.3f}</td></tr>"
@@ -103,6 +156,8 @@ def run_block(r):
     done = i >= r["n"] * 0.99
     chip = '<span class="chip ok"><i></i>finished</span>' if done else '<span class="chip live"><i></i>running</span>'
     pk_peak, pk_lbl = (r.get("peak", peak), "peak, 5 ms") if done else (peak, "peak so far")
+    if done and "peak_drift" in r:
+        pk_d = r["peak_drift"]
     fin_time = f'{total_h:.1f} h' if done else f'{eta:%a %H:%M}'
     fin_lbl = "elapsed" if done else "eta"
     rows = "".join(f"<tr><td>{s[1]:.3f}%</td><td>{s[2]:.1f}</td><td>{s[2]/TEST:.3f}</td>"
@@ -123,6 +178,51 @@ def run_block(r):
       <div class="scroll"><table><thead><tr><th>drift</th><th>base shear kN</th><th>/ test</th><th>step</th></tr></thead><tbody>{rows}</tbody></table></div>
     </article>'''
 
+
+def cyc_block(r):
+    S = r["samples"]
+    if not S:
+        return f'<article class="run" style="--c:{r["color"]}"><div class="run-name">{r["name"]}</div><p>Built, no 50k-step sample yet.</p></article>'
+    i, d, v, t = S[-1]
+    w = S[-7:] if len(S) >= 7 else S
+    rate = (w[-1][0] - w[0][0]) / max(1, w[-1][3] - w[0][3]) if len(w) > 1 else i / max(1, t)
+    pct = i / r["n"] * 100
+    eta = r["t0"] + datetime.timedelta(seconds=t + (r["n"] - i) / rate)
+    pos = max(S, key=lambda s: s[2]); neg = min(S, key=lambda s: s[2])
+    reached = max(abs(s[1]) for s in S)
+    state = ("finished" if r["done"] else "running" if r["alive"] else "STOPPED — log silent > 30 min")
+    chip = ('<span class="chip ok"><i></i>finished</span>' if r["done"] else
+            '<span class="chip live"><i></i>running</span>' if r["alive"] else
+            '<span class="chip todo">stopped?</span>')
+    tp = tips(S)
+    trows = "".join(
+        f"<tr><td>{'+' if s[1] > 0 else '−'}{abs(s[1]):.3f}%</td><td>{s[1]*H_MM/100:+.1f}</td><td>{s[2]:+.1f}</td>"
+        + (f"<td>{env_at(s[1]):.1f}</td><td>{abs(s[2])/env_at(s[1]):.3f}</td>" if env_at(s[1]) else "<td class='dim'>—</td><td class='dim'>—</td>")
+        + f"<td class='dim'>{s[0]//1000:,}k</td></tr>" for s in tp)
+    tip_tbl = (f'<h3>sampled loop tips vs the test envelope at the same displacement</h3>'
+               f'<div class="scroll"><table><thead><tr><th>drift</th><th>mm</th><th>model kN</th><th>test env. kN</th><th>model / test</th><th>step</th></tr></thead>'
+               f'<tbody>{trows}</tbody></table></div>') if tp else ""
+    return f'''
+    <article class="run" style="--c:{r['color']}">
+      <header class="run-h">
+        <div><div class="run-name">{r['name']}</div><div class="run-sub">{r['sub']} · {r['elements']}</div></div>
+        {chip}
+      </header>
+      <div class="bar"><div class="fill" style="width:{pct:.2f}%"></div></div>
+      <dl class="kv">
+        <div><dt>progress</dt><dd>{pct:.1f}% · step {i:,} of {r['n']:,}</dd></div>
+        <div><dt>rate, last 6 samples</dt><dd>{rate:.1f} steps/s</dd></div>
+        <div><dt>eta at that rate</dt><dd>{eta:%a %d %b %H:%M}</dd></div>
+        <div><dt>elapsed</dt><dd>{t/3600:.1f} h · {state}</dd></div>
+        <div><dt>peak sample so far, +</dt><dd>{pos[2]:+.1f} kN · {pos[2]/TEST:.3f} × test · at {pos[1]:+.3f}%</dd></div>
+        <div><dt>peak sample so far, −</dt><dd>{neg[2]:+.1f} kN · {abs(neg[2])/TEST:.3f} × test · at {neg[1]:+.3f}%</dd></div>
+        <div><dt>largest drift so far</dt><dd>{reached:.3f}% = {reached*H_MM/100:.1f} mm of 73.2</dd></div>
+        <div><dt>last sample</dt><dd>{d:+.3f}% · {v:+.1f} kN</dd></div>
+      </dl>
+      <p>Peaks here are RAW console samples every 50,000 steps — unsmoothed, so they can carry ringing, and a sampled tip can sit up to 0.045% drift short of the true reversal. The 5 ms smoothed peak exists only when the run finishes.</p>
+      {tip_tbl}
+    </article>'''
+
 def sw(kind, color):
     if kind == "run":
         return f'<svg width="34" height="12" viewBox="0 0 34 12"><line x1="1" y1="6" x2="33" y2="6" stroke="{color}" stroke-width="2.2"/><circle cx="8" cy="6" r="3" fill="{color}"/><circle cx="26" cy="6" r="3" fill="{color}"/></svg>'
@@ -135,15 +235,21 @@ def sw(kind, color):
     if kind == "cloud":
         return f'<svg width="34" height="12" viewBox="0 0 34 12">' + "".join(f'<rect x="{x}" y="{y}" width="1.6" height="1.6" fill="{color}"/>' for x, y in ((3,4),(7,8),(11,3),(15,7),(19,5),(23,9),(27,4),(31,7))) + '</svg>'
 
-LEGEND = (
+CLOUD_LEG = f'<span>{sw("cloud","var(--faint)")}<span><b>test loops</b> — the digitized Fig. 9(b) cyclic record, grey background</span></span>'
+LEGEND_PUSH = (
     '<div class="legend">'
-    + f'<span>{sw("run","var(--uni)")}<b>uniform 30.5 grid</b> — this study, console samples</span>'
-    + f'<span>{sw("run","var(--gra)")}<b>graded 25 grid</b> — this study, console samples</span>'
-    + f'<span>{sw("dash","var(--test)")}<b>test envelope</b> — running maximum of the digitized Fig. 9(b) loops</span>'
-    + f'<span>{sw("fine","var(--test)")}<b>163.3 kN</b> — measured peak, Table 4</span>'
-    + f'<span>{sw("dot","var(--aydin)")}<b>Aydin 2019</b> — his lattice, horizon 1.5d, 169.8 kN</span>'
-    + f'<span>{sw("cloud","var(--faint)")}<b>test loops</b> — the digitized cyclic record</span>'
-    + '</div>')
+    + f'<span>{sw("run","var(--b15)")}<span><b>b = 0.015</b> · comp linear · f<sub>y</sub> 414 · top band — finished</span></span>'
+    + f'<span>{sw("run","var(--run)")}<span><b>b = 0.01</b> · comp linear · f<sub>y</sub> 414 · top band — finished</span></span>'
+    + f'<span>{sw("run","var(--uni)")}<span><b>uniform 30.5</b> · crushing · b = 0.01 · Stage 1 — finished</span></span>'
+    + f'<span>{sw("run","var(--gra)")}<span><b>graded 25</b> · crushing · b = 0.01 · Stage 1 — finished</span></span>'
+    + f'<span>{sw("dash","var(--test)")}<span><b>test envelope</b> — running maximum of the digitized loops</span></span>'
+    + f'<span>{sw("fine","var(--test)")}<span><b>163.3 kN</b> — measured peak, Table 4</span></span>'
+    + f'<span>{sw("dot","var(--aydin)")}<span><b>Aydin 2019</b> — his lattice, horizon 1.5d, 169.8 kN = 1.040 ×</span></span>'
+    + CLOUD_LEG + '</div>')
+LEGEND_CYC = (
+    '<div class="legend">'
+    + f'<span>{sw("run","var(--cyc)")}<span><b>model loops</b> — the running crushing cyclic, 50k-step console samples</span></span>'
+    + CLOUD_LEG + '</div>')
 
 uni, gra = STATE["runs"]
 u_peak = max(s[2] for s in uni["samples"]); u_last = uni["samples"][-1]
@@ -155,17 +261,17 @@ html = f'''<title>RW2 Run Board</title>
   --ground:#EEF1F3; --surface:#FFFFFF; --sunken:#E3E8EC; --ink:#171B20; --muted:#5A6470; --faint:#8791.9C;
   --faint:#87919C; --line:#D5DBE1; --line-strong:#B9C2CB;
   --test:#A63D2F; --test-soft:#A63D2F1A; --gra:#1E5A86; --uni:#2E7D5B; --aydin:#7A6AA6;
-  --run:#B27A19; --run-soft:#B27A191C; --ok:#1F6E4A; --ok-soft:#1F6E4A18; --warn:#A63D2F;
+  --run:#B27A19; --run-soft:#B27A191C; --cyc:#0E7490; --b15:#B8457A; --ok:#1F6E4A; --ok-soft:#1F6E4A18; --warn:#A63D2F;
   --display:"Archivo",-apple-system,BlinkMacSystemFont,sans-serif; --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
 }}
 @media (prefers-color-scheme:dark){{ :root:not([data-theme="light"]){{
   --ground:#101418; --surface:#181E24; --sunken:#1F262E; --ink:#E6EAEE; --muted:#98A2AD; --faint:#6C7681;
   --line:#2A333C; --line-strong:#3D4854; --test:#D9705C; --test-soft:#D9705C22; --gra:#6FA8D6; --uni:#63B58E; --aydin:#B0A3D6;
-  --run:#D6A64A; --run-soft:#D6A64A22; --ok:#5DB58A; --ok-soft:#5DB58A1E; --warn:#D9705C; }} }}
+  --run:#D6A64A; --run-soft:#D6A64A22; --ok:#5DB58A; --ok-soft:#5DB58A1E; --warn:#D9705C; --cyc:#4FB3CC; --b15:#E08AB0; }} }}
 :root[data-theme="dark"]{{
   --ground:#101418; --surface:#181E24; --sunken:#1F262E; --ink:#E6EAEE; --muted:#98A2AD; --faint:#6C7681;
   --line:#2A333C; --line-strong:#3D4854; --test:#D9705C; --test-soft:#D9705C22; --gra:#6FA8D6; --uni:#63B58E; --aydin:#B0A3D6;
-  --run:#D6A64A; --run-soft:#D6A64A22; --ok:#5DB58A; --ok-soft:#5DB58A1E; --warn:#D9705C; }}
+  --run:#D6A64A; --run-soft:#D6A64A22; --ok:#5DB58A; --ok-soft:#5DB58A1E; --warn:#D9705C; --cyc:#4FB3CC; --b15:#E08AB0; }}
 *{{box-sizing:border-box}}
 body{{background:var(--ground); color:var(--ink); font:15px/1.55 var(--sans); -webkit-font-smoothing:antialiased; margin:0}}
 .wrap{{max-width:700px; margin:0 auto; padding:26px 18px 56px; display:flex; flex-direction:column; gap:28px}}
@@ -219,33 +325,52 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
   </header>
 
   <section class="sect">
-    <h2>Stage 1 · complete</h2>
-    <div class="tiles">
-      <div class="tile"><span class="k">uniform 30.5 · finished</span><span class="v">{FIN['uniform']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['uniform']['peak']:.1f} kN at {FIN['uniform']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
-      <div class="tile"><span class="k">graded 25 · finished</span><span class="v">{FIN['graded']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['graded']['peak']:.1f} kN at {FIN['graded']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
-      <div class="tile test"><span class="k">measured · Aydin</span><span class="v">163.3</span><span class="s">kN, Table 4 · Aydin's own lattice 1.040 ×</span></div>
-    </div>
-    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. Both runs are finished and scored from their stored series (5 ms smoothing — T1 is 20 ms here, D106). A third cell — <b>comp = linear · f<sub>y</sub> 454</b> — is now stepping to 2% drift (below).</p>
+    <h2>Running now</h2>
+    {cyc_block(CYC)}
+    <p><b>Why this cell.</b> The first cyclic attempt (<code>comp = linear</code>) was killed at 0.3% drift: its struts are <code>ElasticMultiLinear</code>, path-independent, so the wall came out nonlinear-elastic — single-valued loops, zero dissipation (D109). Concrete02 has real unload/reload rules. Its monotonic peak equals linear's on RW2 (139.4 vs 139.9 kN) but it sags lower late. <b>Assumed, not printed by the source:</b> b = 0.015, isotropic a1 = a3 = 0.02, and every protocol level — so loop shape and strength are fair comparisons, drift capacity is not. f<sub>y</sub> 414 is the nominal Grade 60 value.</p>
   </section>
 
   <section class="sect">
-    <h2>Against the record</h2>
-    <canvas id="cFull" style="height:300px" aria-label="Both runs over the digitized Fig. 9(b) record, full range"></canvas>
-    {LEGEND}
-    <h3>the range reached so far</h3>
-    <canvas id="cZoom" style="height:300px" aria-label="Both runs over the record, zoomed to the drift reached so far"></canvas>
-    {LEGEND}
-    <p><b>The two grids give one answer.</b> Peaks 139.4 (uniform) and 138.3 kN (graded), 0.854 and 0.847 × the measured; at matched drift the graded/uniform ratio runs 0.98–1.05 from 0.3% to 2.5%. So the peak, the 0.6% step and the post-peak slide are properties of the model, not of the discretization — the same conclusion Aldemir's mesh 25/50 pair gave (D98). Both are the flexural-yield plateau the section check predicted (134 kN at nominal f<sub>y</sub>, no hardening), and both fall behind a test that keeps rising to 163 kN at ~1.5%.</p>
+    <h2>Pushover comparison</h2>
+    <canvas id="cPush" style="height:320px" aria-label="Finished pushovers against the test envelope, Aydin 2019 and the measured peak, positive quadrant"></canvas>
+    {LEGEND_PUSH}
+    <p><b>Read at matched displacement, on the 5 ms smoothed series.</b> The hardening twins share a 0.857 × peak. From 0.8% to 1.6% drift they are within 1% of each other (b.015 / b.01 = 1.008 / 1.011 / 0.991 at 29.3 / 43.9 / 58.6 mm). They separate only after b = 0.01 steps down at ~1.68%: +6.6% at 65.9 mm, +8.0% at 72.0 mm. Against the test envelope both are 0.94 × at 0.8% and 0.86–0.87 × at 1.6%.</p>
+    <div class="scroll"><table><thead><tr><th>u mm</th><th>drift</th><th>test env.</th><th>b = 0.01</th><th>b = 0.015</th><th>b.015 / b.01</th></tr></thead><tbody>
+      <tr><td>14.6</td><td>0.40%</td><td>126.4</td><td>132.4</td><td>132.5</td><td>1.000</td></tr>
+      <tr><td>29.3</td><td>0.80%</td><td>141.2</td><td>132.8</td><td>133.8</td><td>1.008</td></tr>
+      <tr><td>43.9</td><td>1.20%</td><td>151.5</td><td>134.4</td><td>135.9</td><td>1.011</td></tr>
+      <tr><td>58.6</td><td>1.60%</td><td>157.1</td><td>136.5</td><td>135.2</td><td>0.991</td></tr>
+      <tr><td>65.9</td><td>1.80%</td><td>163.3</td><td>129.6</td><td>138.2</td><td class="hi">1.066</td></tr>
+      <tr><td>72.0</td><td>1.97%</td><td class="dim">—</td><td>129.4</td><td>139.8</td><td class="hi">1.080</td></tr>
+    </tbody></table></div>
+    <div class="f alert"><span class="t">Correction (2026-09-23)</span><span class="b">This board and the live doc said b = 0.015 carries +6.0% at 58.6 mm (150.6 vs 142.1 kN, 0.957 × the test envelope). That was ringing: the report's matched-displacement table takes the MAXIMUM raw shear within ±0.73 mm of each target, several ringing periods wide. On the 5 ms smoothed series the two runs differ by −0.9% at 58.6 mm, and b = 0.015 sits at 0.861 × the test. The +7.7% at 73.2 mm survives as +8.0% at 72.0 mm.</span></div>
   </section>
 
   <section class="sect">
-    <h2>Runs</h2>
+    <h2>Cyclic comparison</h2>
+    <canvas id="cCyc" style="height:340px" aria-label="Running cyclic model loops over the digitized test loops, both quadrants"></canvas>
+    {LEGEND_CYC}
+  </section>
+
+  <section class="sect">
+    <h2>Finished runs</h2>
     {run_block(HARD)}
     <p><b>Why hardening next.</b> With f<sub>y</sub> corrected to 414, the top band and the compression law both washed out (139.9 vs 139.4 kN) — so peak is left to f<sub>y</sub>-coupon, <b>hardening</b> and confinement. b = 0.01 is the low end for Grade 60; 0.015 is the realistic central value (f<sub>u</sub>/f<sub>y</sub> ≈ 1.55 at 10% strain). RW2's measured peak sits at ~1.5% drift, deep in the bars' strain-hardening range, so unlike squat Aldemir (where b moved capacity but not peak, D101) this should lift the peak here.</p>
     {run_block(LIN)}
     <p><b>What this cell settled.</b> Run at RW2's <b>correct</b> f<sub>y</sub> = 414 (Table 1; the earlier 0.900 × came from f<sub>y</sub> 454, which is Acun &amp; Sucuoglu's specimen, not RW2) plus the dense top-zone band, it peaks at <b>139.9 kN = 0.857 ×</b> — right <b>on</b> the crushing/f<sub>y</sub>414 baseline (139.4). Two things fall out: the <b>top band does not lift the peak</b> (load-introduction, not base flexure — as predicted), and <b>comp = linear equals crushing</b> at fixed f<sub>y</sub> (D87). The gap to the test is now cleanly f<sub>y</sub>-coupon + hardening + confinement, not the compression law. Reaches 72 mm at ~130 kN = 0.79 ×.</p>
     {run_block(uni)}
     {run_block(gra)}
+  </section>
+
+  <section class="sect">
+    <h2>Stage 1 · complete</h2>
+    <div class="tiles">
+      <div class="tile"><span class="k">uniform 30.5 · finished</span><span class="v">{FIN['uniform']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['uniform']['peak']:.1f} kN at {FIN['uniform']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
+      <div class="tile"><span class="k">graded 25 · finished</span><span class="v">{FIN['graded']['peak']/TEST:.3f} ×</span><span class="s">peak {FIN['graded']['peak']:.1f} kN at {FIN['graded']['peak_drift']:.2f}% · to 2.5%, converged</span></div>
+      <div class="tile test"><span class="k">measured · Aydin</span><span class="v">163.3</span><span class="s">kN, Table 4 · Aydin's own lattice 1.040 ×</span></div>
+    </div>
+    <p>Both runs are the same cell — <b>crushing / solved / perfect bond</b>, Concrete02, b = 0.01, f<sub>y</sub> 414 (nominal), no rupture switch, ζ = 0.5, 7.6 mm/s, explicit CentralDifference, target <b>2.5% drift</b> — and differ only in the grid. Both runs are finished and scored from their stored series (5 ms smoothing — T1 is 20 ms here, D106).</p>
+    <p><b>The two grids give one answer.</b> Peaks 139.4 (uniform) and 138.3 kN (graded), 0.854 and 0.847 × the measured; at matched drift the graded/uniform ratio runs 0.98–1.05 from 0.3% to 2.5%. So the peak, the 0.6% step and the post-peak slide are properties of the model, not of the discretization — the same conclusion Aldemir's mesh 25/50 pair gave (D98). Both are the flexural-yield plateau the section check predicted (134 kN at nominal f<sub>y</sub>, no hardening), and both fall behind a test that keeps rising to 163 kN at ~1.5%.</p>
   </section>
 
   <section class="sect">
@@ -287,9 +412,9 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
     <div class="plan">
       <div class="step"><span class="n">stage 0</span><span class="w">Elastic gates<small>continuum, cantilever, both calibration fields, both grids</small></span><span class="chip ok"><i></i>done</span></div>
       <div class="step"><span class="n">stage 1</span><span class="w">Baseline pushover to 2.5%<small>crushing / solved / perfect — uniform 0.854 ×, graded 0.847 ×; grid-objective to 5% at every drift</small></span><span class="chip ok"><i></i>done</span></div>
-      <div class="step"><span class="n">stage 2</span><span class="w">The matrix<small>compression law × tension tail; comp = linear · f<sub>y</sub> 454 firing to 2% now</small></span><span class="chip live"><i></i>running</span></div>
+      <div class="step"><span class="n">stage 2</span><span class="w">The matrix<small>compression law: linear = crushing on peak (139.9 vs 139.4 kN at f<sub>y</sub> 414); hardening pair b 0.01 / 0.015 — equal 0.857 × peaks, +6–8% at 58–73 mm</small></span><span class="chip ok"><i></i>done</span></div>
       <div class="step"><span class="n">stage 3</span><span class="w">Failure model<small>--steel-rupture × --concrete-residual 0, then b × ε<sub>su</sub>; likely also f<sub>y</sub> and a confined boundary grade</small></span><span class="chip todo">queued</span></div>
-      <div class="step"><span class="n">stage 4</span><span class="w">Cyclic<small>on the cell that reproduces the monotonic peak; levels invented, said so</small></span><span class="chip todo">queued</span></div>
+      <div class="step"><span class="n">stage 4</span><span class="w">Cyclic<small>crushing · b 0.015 · iso 0.02 · ladder to 2.0% — levels invented, said so; the comp = linear attempt was killed (nonlinear-elastic, D109)</small></span><span class="chip live"><i></i>running</span></div>
     </div>
   </section>
 
@@ -322,24 +447,28 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
 <script>
 (function(){{
   var R={json.dumps(REF)}, TEST={TEST};
-  var RUNS={json.dumps([{ "c": r["color"], "pts": [[s[1], s[2]] for s in r["samples"]] } for r in STATE["runs"]])};
+  var PUSH={json.dumps([{ "c": r["color"], "pts": [[s[1], s[2]] for s in r["samples"]] } for r in (uni, gra, LIN, HARD)])};
+  var CYCR={json.dumps([{ "c": CYC["color"], "pts": [[s[1], s[2]] for s in CYC["samples"]] }])};
   function css(v){{return getComputedStyle(document.documentElement).getPropertyValue(v.slice(4,-1)).trim();}}
-  function draw(id,xlim,ylim){{
+  function draw(id,xlim,ylim,runs,o){{ o=o||{{}};
     var c=document.getElementById(id); if(!c) return; var W=c.clientWidth||660,Hh=c.clientHeight||300;
     c.width=W*2; c.height=Hh*2; var g=c.getContext('2d'); g.scale(2,2);
     var ink=css('var(--ink)'),faint=css('var(--faint)'),line=css('var(--line)'),test=css('var(--test)'),ayd=css('var(--aydin)');
     var L=46,Rr=12,T=14,B=32, X=function(x){{return L+(x-xlim[0])/(xlim[1]-xlim[0])*(W-L-Rr)}}, Y=function(y){{return T+(ylim[1]-y)/(ylim[1]-ylim[0])*(Hh-T-B)}};
     g.font='10px IBM Plex Mono, monospace'; g.fillStyle=faint; g.strokeStyle=line; g.lineWidth=1;
-    for(var y=ylim[0]; y<=ylim[1]+1e-9; y+=50){{ g.beginPath(); g.moveTo(L,Y(y)); g.lineTo(W-Rr,Y(y)); g.stroke(); g.fillText(y,4,Y(y)+3); }}
+    for(var y=ylim[0]; y<=ylim[1]+1e-9; y+=(o.ys||50)){{ g.beginPath(); g.moveTo(L,Y(y)); g.lineTo(W-Rr,Y(y)); g.stroke(); g.fillText(y,4,Y(y)+3); }}
     var xs=(xlim[1]-xlim[0])>1?0.5:0.1; for(var x=Math.ceil(xlim[0]/xs-1e-9)*xs; x<=xlim[1]+1e-9; x+=xs){{ g.beginPath(); g.moveTo(X(x),T); g.lineTo(X(x),Hh-B); g.stroke(); g.fillText(x.toFixed(1)+'%',X(x)-11,Hh-B+14); }}
     g.fillStyle=faint; g.globalAlpha=.55; R.cloud.forEach(function(p){{ if(p[0]>=xlim[0]&&p[0]<=xlim[1]&&p[1]>=ylim[0]&&p[1]<=ylim[1]) g.fillRect(X(p[0])-.7,Y(p[1])-.7,1.4,1.4); }}); g.globalAlpha=1;
     function poly(pts,col,w,dash){{ g.strokeStyle=col; g.lineWidth=w; g.setLineDash(dash||[]); g.beginPath(); var f=true; pts.forEach(function(p){{ if(p[0]<xlim[0]||p[0]>xlim[1]) return; var px=X(p[0]),py=Y(Math.max(ylim[0],Math.min(ylim[1],p[1]))); if(f){{g.moveTo(px,py);f=false;}} else g.lineTo(px,py); }}); g.stroke(); g.setLineDash([]); }}
-    poly(R.env,test,1.6,[5,4]); poly(R.aydin,ayd,1.4,[2,3]);
-    g.strokeStyle=test; g.setLineDash([1,3]); g.beginPath(); g.moveTo(L,Y(TEST)); g.lineTo(W-Rr,Y(TEST)); g.stroke(); g.setLineDash([]);
-    RUNS.forEach(function(r){{ var col=css(r.c); poly(r.pts,col,2.2); g.fillStyle=col; r.pts.forEach(function(p){{ if(p[0]>=xlim[0]&&p[0]<=xlim[1]){{ g.beginPath(); g.arc(X(p[0]),Y(p[1]),3.2,0,6.3); g.fill(); }} }}); }});
+    if(o.refs){{ poly(R.env,test,1.6,[5,4]); poly(R.aydin,ayd,1.4,[2,3]);
+      g.strokeStyle=test; g.lineWidth=1.2; g.setLineDash([1,3]); g.beginPath(); g.moveTo(L,Y(TEST)); g.lineTo(W-Rr,Y(TEST)); g.stroke(); g.setLineDash([]);
+      g.fillStyle=test; g.font='10px IBM Plex Mono, monospace'; g.fillText('measured 163.3 kN',W-Rr-104,Y(TEST)-4); }}
+    if(o.axes0){{ g.strokeStyle=line; g.lineWidth=1.4; g.beginPath(); g.moveTo(X(0),T); g.lineTo(X(0),Hh-B); g.moveTo(L,Y(0)); g.lineTo(W-Rr,Y(0)); g.stroke(); }}
+    runs.forEach(function(r){{ var col=css(r.c); poly(r.pts,col,o.lw||2.2); g.fillStyle=col; var rad=o.dot||3.2; r.pts.forEach(function(p){{ if(p[0]>=xlim[0]&&p[0]<=xlim[1]){{ g.beginPath(); g.arc(X(p[0]),Y(Math.max(ylim[0],Math.min(ylim[1],p[1]))),rad,0,6.3); g.fill(); }} }});
+      if(o.last&&r.pts.length){{ var q=r.pts[r.pts.length-1]; g.strokeStyle=col; g.lineWidth=2; g.beginPath(); g.arc(X(q[0]),Y(q[1]),6,0,6.3); g.stroke(); }} }});
     g.fillStyle=ink; g.font='11px IBM Plex Sans, sans-serif'; g.fillText('base shear (kN)  vs  drift (%) = top displacement / 3660 mm', L+6, T+12);
   }}
-  function all(){{ draw('cFull',[-2.1,2.1],[-200,200]); draw('cZoom',[0,0.8],[0,200]); }}
+  function all(){{ draw('cPush',[0,2.1],[0,180],PUSH,{{refs:true,ys:30,dot:2.2}}); draw('cCyc',[-2.1,2.1],[-200,200],CYCR,{{axes0:true,lw:1.6,dot:1.8,last:true}}); }}
   all(); window.addEventListener('resize',all);
   if(window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',all);
 }})();
@@ -347,3 +476,17 @@ footer{{font:12px/1.6 var(--mono); color:var(--faint); border-top:1px solid var(
 '''
 (OUT / "rw2_board.html").write_text(html)
 print(len(html))
+
+# --- tick summary for tick.py (doc widget + running paragraph); cheap, re-derived from the log each time
+S = CYC["samples"]
+summ = {"dir": CYC["dir"].name, "n": CYC["n"], "done": CYC["done"], "alive": CYC["alive"],
+        "samples": [[s[0], s[1], s[2], s[3]] for s in S], "t0": CYC["t0"].isoformat()}
+if S:
+    i, d, v, t = S[-1]; w = S[-7:] if len(S) >= 7 else S
+    rate = (w[-1][0] - w[0][0]) / max(1, w[-1][3] - w[0][3]) if len(w) > 1 else i / max(1, t)
+    summ.update(step=i, pct=i / CYC["n"] * 100, rate=rate, elapsed_h=t / 3600,
+                eta=(CYC["t0"] + datetime.timedelta(seconds=t + (CYC["n"] - i) / rate)).isoformat(),
+                pos=max(S, key=lambda s: s[2]), neg=min(S, key=lambda s: s[2]),
+                reached=max(abs(s[1]) for s in S), last=[d, v],
+                tips=[[s[1], s[2], env_at(s[1])] for s in tips(S)])
+(OUT / "rw2_tick.json").write_text(json.dumps(summ))
