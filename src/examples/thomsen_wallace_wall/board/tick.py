@@ -35,8 +35,9 @@ if step:
     run = (f"**{T['pct']:.1f}%** — step {step:,} of {T['n']:,}, {T['rate']:.0f} steps/s, "
            f"{T['elapsed_h']:.1f} h in, ETA **{eta:%a %d %b %H:%M}** at that rate. Largest drift so far "
            f"{T['reached']:.3f}% ({T['reached']*H/100:.1f} of 73.2 mm). Peak raw samples so far "
-           f"**{p[2]:+.1f} kN** ({p[2]/TEST:.3f} × test) at {p[1]:+.3f}% and **{n[2]:+.1f} kN** "
-           f"({abs(n[2])/TEST:.3f} ×) at {n[1]:+.3f}% — unsmoothed 50k-step samples; the 5 ms peak comes at the end.")
+           f"**{p[2]:+.1f} kN** ({p[2]/TEST:.3f} × test) at {p[1]:+.3f}%"
+           + (f" and **{n[2]:+.1f} kN** ({abs(n[2])/TEST:.3f} ×) at {n[1]:+.3f}%" if n[2] < 0 else "")
+           + " — unsmoothed 50k-step samples; the 5 ms peak comes at the end.")
 else:
     run = "Built and stepping; no 50k-step sample yet."
 (OUT / "doc_running.md").write_text(run)

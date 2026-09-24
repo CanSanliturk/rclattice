@@ -84,7 +84,9 @@ CYC = {"key": "cyclic", "name": "cyclic ladder to 2.0% · comp = crushing (Concr
 CYC["dir"], CYC["samples"], CYC["n"] = console(CYC["glob"])
 CYC["t0"] = datetime.datetime.strptime(CYC["dir"].name[:17], "%Y-%m-%d_%H%M%S")
 CYC["done"] = (CYC["dir"] / "data.json").exists()
-CYC["alive"] = (NOW.timestamp() - (CYC["dir"] / "console.log").stat().st_mtime) < 1800
+import subprocess as _sp
+CYC["alive"] = ((NOW.timestamp() - (CYC["dir"] / "console.log").stat().st_mtime) < 1800
+                and _sp.run(["pgrep", "-f", "run.py --analysis cyclic"], capture_output=True).returncode == 0)
 
 # the two finished hardening pushovers: full series from their own logs, smoothed peaks from report.md
 for _r, _pat in ((HARD, "2026-09-23_080145_pushover*"), (LIN, "2026-09-22_164402_pushover*")):
@@ -96,7 +98,7 @@ LIN.update(peak_drift=0.56)
 
 def env_at(d_pct):
     """Test envelope (rw2_ref.json `env`, both signs) interpolated at a signed drift."""
-    pts = sorted(p for p in REF["env"] if (p[0] > 0) == (d_pct > 0))
+    pts = sorted((p for p in REF["env"] if (p[0] > 0) == (d_pct > 0)), key=lambda p: abs(p[0]))
     xs = [abs(p[0]) for p in pts]; ys = [abs(p[1]) for p in pts]; x = abs(d_pct)
     if not xs or x < xs[0] or x > xs[-1]:
         return None
@@ -190,7 +192,7 @@ def cyc_block(r):
     eta = r["t0"] + datetime.timedelta(seconds=t + (r["n"] - i) / rate)
     pos = max(S, key=lambda s: s[2]); neg = min(S, key=lambda s: s[2])
     reached = max(abs(s[1]) for s in S)
-    state = ("finished" if r["done"] else "running" if r["alive"] else "STOPPED — log silent > 30 min")
+    state = ("finished" if r["done"] else "running" if r["alive"] else "STOPPED — process gone, no data.json")
     chip = ('<span class="chip ok"><i></i>finished</span>' if r["done"] else
             '<span class="chip live"><i></i>running</span>' if r["alive"] else
             '<span class="chip todo">stopped?</span>')
@@ -215,7 +217,7 @@ def cyc_block(r):
         <div><dt>eta at that rate</dt><dd>{eta:%a %d %b %H:%M}</dd></div>
         <div><dt>elapsed</dt><dd>{t/3600:.1f} h · {state}</dd></div>
         <div><dt>peak sample so far, +</dt><dd>{pos[2]:+.1f} kN · {pos[2]/TEST:.3f} × test · at {pos[1]:+.3f}%</dd></div>
-        <div><dt>peak sample so far, −</dt><dd>{neg[2]:+.1f} kN · {abs(neg[2])/TEST:.3f} × test · at {neg[1]:+.3f}%</dd></div>
+        <div><dt>peak sample so far, −</dt><dd>{(f'{neg[2]:+.1f} kN · {abs(neg[2])/TEST:.3f} × test · at {neg[1]:+.3f}%' if neg[2] < 0 else 'no negative half-cycle yet')}</dd></div>
         <div><dt>largest drift so far</dt><dd>{reached:.3f}% = {reached*H_MM/100:.1f} mm of 73.2</dd></div>
         <div><dt>last sample</dt><dd>{d:+.3f}% · {v:+.1f} kN</dd></div>
       </dl>
