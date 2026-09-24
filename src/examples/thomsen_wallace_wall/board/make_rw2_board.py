@@ -16,7 +16,7 @@ NOW = datetime.datetime.now()
 T0 = datetime.datetime(2026, 9, 20, 17, 44, 35)
 TEST = 163.284
 STATE = {
-    "stamp_note": 'NOW: cyclic ladder to 2.0% drift on comp = crushing (Concrete02), launched 23:47, ~130 h. The first cyclic attempt (comp = linear) was killed at 0.3%: ElasticMultiLinear struts made the wall nonlinear-elastic, zero dissipation (D109). Both hardening pushovers finished: equal 0.857x peaks, but b = 0.015 carries +6.0% at 58.6 mm and +7.7% at 73.2 mm.',
+    "stamp_note": 'RELAUNCHED DETACHED (D111). The measured-materials crushing cyclic (D110) launched 14:31 was KILLED at ~23:44 on 09-24 when the Claude desktop app restarted - it was a child of the session, the exact failure the CRITICAL RULE warns of. It had reached step 2.35 M of 34.1 M (6.9%) in 9 h; there are no checkpoints, so it restarts from zero. Relaunched 23:59 detached (own session/pgid, ppid = launchd), verified surviving detachment, ETA ~167 h (~7 days). Same command, no parameter changed. The materials are still the primary source: Orakcal & Wallace 2006 coupon steel f_y 434 (#3) / 448 (#2) with b = 0.02, a CONFINED boundary grade f\'c 47.6 vs the web\'s 42.8, and the test\'s OWN 8-level protocol. The two hardening pushovers still stand at equal 0.857x peaks.',
     "runs": [
         {"key": "uniform", "name": "uniform 30.5 mm grid", "sub": "bars snapped to the grid · grid-mode control",
          "elements": "4,961 nodes · 22,002 elements", "n": 2726277, "color": "var(--uni)",
@@ -76,11 +76,10 @@ def console(pattern):
     n = int(m[0][1].replace(",", "")) if m else None
     return d, s, n
 
-CYC = {"key": "cyclic", "name": "cyclic ladder to 2.0% · comp = crushing (Concrete02)",
-       "sub": "b = 0.015 · isotropic a1 = a3 = 0.02 · f<sub>y</sub> 414 · top band 1000 · uniform 30.5 · "
-              "8 invented levels 0.1 / 0.2 / 0.3 / 0.4 / 0.6 / 1.0 / 1.5 / 2.0% drift, 1 cycle each",
+CYC = {"key": "cyclic", "name": "cyclic, the TEST'S OWN protocol · comp = crushing (Concrete02)",
+       "sub": "MEASURED materials (f<sub>y</sub> 434/448, b 0.02, confined boundary f'c 47.6) · isotropic a1 = a3 = 0.02 · top band 1000 · uniform 30.5 · the test's own 8 levels driven at its measured peak displacements (3.05 / 7.4 / 16.0 / 24.35 / 32.95 / 50.2 / 67.2 / 85.0 mm), 1 cycle each",
        "elements": "4,961 nodes · 22,310 elements", "color": "var(--cyc)",
-       "glob": "2026-09-23_234740_cyclic_crushing*"}
+       "glob": "2026-09-24_235853_cyclic_crushing*"}
 CYC["dir"], CYC["samples"], CYC["n"] = console(CYC["glob"])
 CYC["t0"] = datetime.datetime.strptime(CYC["dir"].name[:17], "%Y-%m-%d_%H%M%S")
 CYC["done"] = (CYC["dir"] / "data.json").exists()
