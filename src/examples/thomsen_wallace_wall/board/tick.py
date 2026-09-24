@@ -27,7 +27,7 @@ code = ("export default () => <claude.Visualize data-claude-component='rw2cyc' s
         "source:'model', axes:{x:[{column:'drift', type:'linear', title:'drift (%)', format:{kind:'number', suffix:'%'}}], "
         "y:[{title:'base shear', min:-200, max:200, format:{kind:'number', suffix:' kN'}}]}, "
         "marks:[{type:'point', y:'shear', source:'cloud', title:'test loops (digitized)', tone:{column:'shear', cutoffs:[-1000, 1000]}}, "
-        "{type:'point', y:'shear', title:'model (crushing, b 0.015, iso 0.02)'}]}} />;")
+        "{type:'point', y:'shear', title:'model (crushing, measured mat, iso 0.02)'}]}} />;")
 (OUT / "doc_cyc_widget.js").write_text(code)
 
 if step:
