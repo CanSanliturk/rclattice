@@ -84,6 +84,19 @@ def apply_material_overrides(params: dict) -> dict | None:
     if fy != specimen.STEEL.fy:
         specimen.STEEL = dataclasses.replace(specimen.STEEL, name=f"Gr-fy{fy:g}", fy=fy)
         out["fy"] = [414.0, fy]
+    if params.get("materials") == "measured":
+        # D110: the primary source's own numbers. zone_of() and steel_for() read this flag, so the
+        # confined boundary grade and the per-bar-size steel both switch on together.
+        specimen.MEASURED = True
+        out["materials"] = ["nominal", "measured"]
+        out["fy_be_web"] = [specimen.FY, [specimen.FY_BE_MEAS, specimen.FY_WEB_MEAS]]
+        out["steel_b"] = [specimen.STEEL.b, specimen.B_MEAS]
+        out["fc_boundary"] = [specimen.FC, specimen.FC_BE_MEAS]
+        out["note_measured"] = ("Orakcal & Wallace 2006 Tables 2/3; bare-bar steel (NOT the "
+                                "tension-stiffened 395/336, which would double-count the lattice's "
+                                "own concrete tension); epsc0 still derived per D56")
+    else:
+        specimen.MEASURED = False
     iso = float(params.get("steel_iso", 0.0))
     if iso != 0.0:
         # a1 = a3 = iso grows BOTH envelopes equally; a2 = a4 = 1 keeps the reference plastic
@@ -95,6 +108,12 @@ def apply_material_overrides(params: dict) -> dict | None:
 
 
 def steel_b(params: dict) -> float | None:
+    """`--steel-b` override, or None to leave each grade's own b alone.
+
+    Under `--materials measured` this always returns None: the measured grades carry b = 0.02 from
+    the source, and `_bars` would otherwise overwrite it on every bar (D110)."""
+    if params.get("materials") == "measured":
+        return None
     b = float(params["steel_b"])
     return None if b == specimen.STEEL.b else b
 
@@ -133,6 +152,7 @@ def build(params: dict):
         "concrete_residual": float(params["concrete_residual"]),
         "steel_b": float(params["steel_b"]),
         "steel_iso": float(params.get("steel_iso", 0.0)),
+        "materials": params.get("materials", "nominal"),
         "top_band_mm": float(params["top_band"]),
         "top_band_pitch_mm": float(params["top_band_pitch"]),
         "gf_factor": gff,

@@ -13,6 +13,8 @@ v2 (2026-09-22): `top_band` / `top_band_pitch` — the Fig. 9(a) dense top load-
 v3 (2026-09-23): `steel_iso` — Steel02 isotropic hardening (D109), OFF by default so the bar stays
 purely kinematic and no v1/v2 run changes. Acts at strain REVERSALS — cyclic runs, and the ringing
 of an explicit pushover too (D109).
+v4 (2026-09-24): `materials` — 'nominal' (unchanged default) or 'measured', the primary source's
+own coupon steel and confined boundary concrete (D110, Orakcal & Wallace 2006).
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from rclattice.study.registry import (Param, Registry, analysis_param, analysis_
                                       concrete_params, discretisation_params, failure_params,
                                       rebar_params, report_params)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 REGISTRY: tuple[Param, ...] = (
     analysis_param(),
@@ -56,8 +58,13 @@ REGISTRY: tuple[Param, ...] = (
                      ft_source="Table 1, no footnote; = 0.31 sqrt(fc)"),
     Param("fcx", "fcx", 1.0, "strut compressive-strength scale, `capped` only", "model", type=float),
     *failure_params(steel_b=0.01),
-    Param("fy", "fy", 414.0, "steel yield in MPa (Table 1: the NOMINAL 60 ksi; coupons unprinted)",
-          "model", type=float),
+    Param("fy", "fy", 414.0, "steel yield in MPa (Table 1: the NOMINAL 60 ksi; coupons unprinted). "
+          "IGNORED when --materials measured, which sets f_y per bar size", "model", type=float),
+    Param("materials", "mat", "nominal", "which material set (D110). 'nominal' = the 2019 paper's "
+          "single f_y 414 and one concrete zone. 'measured' = the PRIMARY source (Orakcal & Wallace "
+          "2006, ACI 103-S21): bare-bar f_y 434 (#3 boundary) / 448 (#2 web) with b = 0.02, and a "
+          "CONFINED boundary grade f'c 47.6 over the bottom 1.22 m against the web's 42.8. Overrides "
+          "--fy and --steel-b", "model", stem=True, choices=("nominal", "measured")),
     Param("steel_iso", "iso", 0.0, "Steel02 ISOTROPIC hardening (D109): sets a1 = a3 (a2 = a4 = 1); "
           "at each strain reversal the yield asymptote becomes fy*(1 + iso*d^0.8), d = strain RANGE "
           "/ (2 eps_y), so ANY reversal already gives +iso and +/-10 eps_y cycles give ~1.10x. "

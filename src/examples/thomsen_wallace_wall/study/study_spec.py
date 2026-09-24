@@ -66,6 +66,23 @@ PRESETS = {
     "probe": (0.001, 0.0025, 0.005),
     "to1p0": (0.001, 0.0025, 0.005, 0.0075, 0.010),
     "to2p0": (0.001, 0.0025, 0.005, 0.0075, 0.010, 0.015, 0.020),
+    # THE TEST'S OWN PROTOCOL (D110) — Orakcal & Wallace 2006 Table 1, "Peak lateral top
+    # displacements at applied drift levels" for RW2. Its nominal labels are
+    # 0.1/0.25/0.5/0.75/1.0/1.5/2.0/2.5%, but the MEASURED peak top displacements are what the
+    # actuator actually applied, and they do NOT equal label x 3660 (the implied height runs
+    # 2880 -> 3448 mm across the levels, so the label is a target, not a ratio). We drive the
+    # measured MILLIMETRES, expressed here as a fraction of our own 3660 mm denominator, and take
+    # the mean of the + and - peaks since the runner drives a symmetric +/-a per level:
+    #   label  +mm    -mm    mean    /3660
+    #   0.10    2.9   -3.2    3.05   0.000833
+    #   0.25    7.2   -7.6    7.40   0.002022
+    #   0.50   16.1  -15.9   16.00   0.004372
+    #   0.75   24.5  -24.2   24.35   0.006653
+    #   1.00   33.1  -32.8   32.95   0.009003
+    #   1.50   50.6  -49.8   50.20   0.013716
+    #   2.00   67.9  -66.5   67.20   0.018361
+    #   2.50   86.2  -83.8   85.00   0.023224
+    "measured": (0.000833, 0.002022, 0.004372, 0.006653, 0.009003, 0.013716, 0.018361, 0.023224),
 }
 # hours per mm of drive path: MEASURED on the finished uniform-30.5 Stage 1 push (D106); the graded
 # 25 grid runs ~1.9x dearer; the
@@ -73,10 +90,12 @@ PRESETS = {
 H_PER_MM = {"perfect": 0.146, "bond": 1.17}    # perfect MEASURED on the finished uniform-30.5 push (D106); bond scaled x8 as on Aldemir
 PROTOCOLS = ProtocolSet(
     presets=PRESETS, h_per_mm=H_PER_MM, ladder=LADDER, invented=True,
-    invented_note=("THE PROTOCOL LEVELS ARE INVENTED: the 2019 paper says the test was cycled at\n"
-                   "increasing amplitudes but prints no levels; the cloud shows ~8 amplitudes to\n"
-                   "~72 mm. Drift capacity from a cyclic run is therefore a model property, not a\n"
-                   "comparison, until the primary source is in hand."))
+    invented_note=("PROTOCOL: `--proto measured` is the TEST'S OWN, from the primary source\n"
+                   "(Orakcal & Wallace 2006, Table 1; D110) — 8 levels driven at the measured peak\n"
+                   "top displacements, so loop shape and drift capacity are now real comparisons.\n"
+                   "EVERY OTHER preset is INVENTED in shape and constrained only in reach; with\n"
+                   "those, capacity stays a model property. The cycle COUNT is still ours: the\n"
+                   "paper shows >= 2 cycles per level, the runner defaults to 1 (--cycles)."))
 
 SOURCES = {
     "grid": ("assumed", "'rebar' puts every bar axis on a node exactly (D104); 'uniform' snaps "
@@ -109,7 +128,10 @@ SOURCES = {
     "steel_iso": ("assumed", "not printed; isotropic hardening, acts at every strain reversal (D109)"),
     "rate": ("assumed", "the repo's cross-study drive speed; the licence is the residual (D64)"),
     "damping": ("assumed", "damping is the knob that matters, not rate (D64)"),
-    "proto": ("assumed", "levels invented; the test's are not printed"),
+    "proto": ("measured", "'measured' = the test's own levels (Orakcal & Wallace 2006 Table 1, "
+                          "D110); every other preset is invented"),
+    "materials": ("measured", "'measured' = the primary source's coupon steel and confined "
+                              "boundary concrete (D110); 'nominal' = the 2019 paper's single f_y"),
     "cycles": ("assumed", "one per level"),
     "drift": ("assumed", "how far this run was asked to go — NOT a capacity"),
     "analysis": ("convention", "which runner is used"),

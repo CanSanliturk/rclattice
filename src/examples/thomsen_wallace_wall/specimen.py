@@ -136,6 +136,50 @@ GRADES = {
 # (D101/D102: unprinted, and the largest single control on drift capacity).
 STEEL = SteelGrade(name="Gr60", fy=FY, E0=ES, b=0.01)
 
+# --- MEASURED materials, from the PRIMARY source (D110) -------------------------------------------
+#
+# Orakcal, K., and Wallace, J. W. 2006. "Flexural Modeling of Reinforced Concrete Walls —
+# Experimental Verification." ACI Structural Journal 103(S21) — `OrakcalWallace2006_ACI103-S21_RW2.pdf`
+# in this directory. It reports the Thomsen & Wallace test directly, so the three quantities the
+# 2019 paper left us assuming are no longer assumptions. OPT-IN via `--materials measured`; the
+# `nominal` default above is unchanged so every run before 2026-09-24 still reproduces.
+#
+# STEEL — its Tables 2 and 3. We take the BARE-BAR values, NOT the tension-stiffened ones: the
+# paper's 395/336 MPa are calibrated for an MVLEM whose steel element carries the concrete's
+# tension stiffening too, whereas this lattice models concrete tension with its OWN struts, so
+# using them would double-count. Note #2 (web) yields HIGHER than #3 (boundary).
+FY_BE_MEAS, FY_WEB_MEAS = 434.0, 448.0        # MPa, bare-bar compression tests (#3, #2)
+B_MEAS = 0.02                                 # strain-hardening ratio, both bar sizes
+# For reference, the tension-stiffened pair this study deliberately does NOT use:
+FY_BE_TENSION_STIFFENED, B_BE_TENSION_STIFFENED = 395.0, 0.0185
+FY_WEB_TENSION_STIFFENED, B_WEB_TENSION_STIFFENED = 336.0, 0.0350
+
+# CONCRETE — its Table 3. The boundary elements are CONFINED and stronger than the web.
+FC_BE_MEAS = 47.6                             # MPa, boundary (confined); web stays FC = 42.8
+# Its measured strains at peak are eps_c' = 0.0033 (boundary) and 0.0021 (web). We do NOT use them:
+# Concrete02's initial compressive tangent is 2*fc/epsc0 whatever the grade's E says, so adopting a
+# measured epsc0 would silently move the modulus off the calibrated Ec (D56). Their model is a
+# Popovics/Tsai curve with an `r` shape parameter, which decouples the two; Concrete02 cannot.
+# Keeping the D56 derivation costs peak STRAIN and keeps MODULUS — recorded, not fitted.
+EPSC0_BE_MEASURED_UNUSED, EPSC0_WEB_MEASURED_UNUSED = 0.0033, 0.0021
+EPSC0_BE = 2.0 * FC_BE_MEAS / EC              # 0.003068, against their measured 0.0033
+
+# The confined boundary elements run over the BOTTOM 1.22 m only ("well-detailed boundary elements
+# were provided at the edges of the walls over the bottom 1.22 m of each wall"), and span the four
+# boundary bar positions plus cover.
+BE_WIDTH = X_BE_LEFT[-1] + COVER_X            # 191 mm
+BE_HEIGHT = 1220.0
+
+GRADES["boundary"] = ConcreteGrade(name="boundary", E=EC, nu=NU, rho=RHO_C, fc=FC_BE_MEAS, ft=FT,
+                                   Gf=GF, epsc0=EPSC0_BE, fcu=0.2 * FC_BE_MEAS,
+                                   epsU=8.0 * EPSC0_BE)
+STEEL_BE = SteelGrade(name="No3-meas", fy=FY_BE_MEAS, E0=ES, b=B_MEAS)
+STEEL_WEB = SteelGrade(name="No2-meas", fy=FY_WEB_MEAS, E0=ES, b=B_MEAS)
+
+# Set by `--materials measured` (models.apply_material_overrides). When False every bar uses the
+# single nominal `STEEL` and the whole panel is one "wall" zone, exactly as before.
+MEASURED = False
+
 # --- discretisation ---------------------------------------------------------------------------------
 #
 # TWO GRID MODES (user decision, 2026-09-20; D104):
@@ -154,11 +198,36 @@ QUASI_STATIC_RATE = 7.6         # mm/s
 DAMPING_RATIO = 0.5
 
 
-def zone_of(_x: float, _y: float) -> str:
-    """One concrete zone: the paper reports a single f_c and models a single rectangle. The
-    confined boundary elements get NO separate grade — the hoops are in-plane rebar struts that
-    restrain the compressed boundary themselves, so a Mander grade would double-count (D66)."""
+def zone_of(x: float, y: float) -> str:
+    """Concrete zone at a point.
+
+    NOMINAL (default): one zone. The 2019 paper reports a single f_c and models a single
+    rectangle, and the D66 reasoning applied — the hoops are already in-plane rebar struts that
+    restrain the compressed boundary, so inventing a Mander grade would double-count.
+
+    MEASURED (`--materials measured`, D110): the primary source MEASURED the confined boundary at
+    f'c = 47.6 MPa against the web's 42.8, so the stronger grade is reported, not invented, and
+    D66 no longer applies. It covers the two boundary elements over the BOTTOM 1.22 m only, which
+    is the extent the paper gives.
+    """
+    if not MEASURED:
+        return "wall"
+    if y <= BE_HEIGHT + EPS and (x <= BE_WIDTH + EPS or x >= LW - BE_WIDTH - EPS):
+        return "boundary"
     return "wall"
+
+
+def steel_for(*, boundary: bool) -> SteelGrade:
+    """The steel grade for a bar. One nominal grade by default; #3 / #2 measured under D110.
+
+    CAVEAT: the source tests only #3 and #2 bars, so the 4.76 mm HOOP WIRE has no measured
+    strength. It is given the #3 grade here because it sits in the boundary element — an
+    assumption covering 96 of the 127 bars by count, though the hoops are horizontal and carry
+    little of this flexure-dominated wall's in-plane demand.
+    """
+    if not MEASURED:
+        return STEEL
+    return STEEL_BE if boundary else STEEL_WEB
 
 
 def wall_problem(*, length: float = LW, height: float = HW) -> Problem:
@@ -236,15 +305,20 @@ def rebars(grid: str = GRID, mesh_size: float = MESH, *, length: float = LW, hei
     top = height if full_height else snap(height - 2 * mesh_size, ys)
     bars: list[Rebar] = []
     for x, x0 in zip(lay["x_vertical"], X_BARS):
-        area = A_BE_LINE if (x0 in X_BE_LEFT or x0 in X_BE_RIGHT) else A_WEB_LINE
-        bars.append(Rebar(path=[(x, 0.0), (x, top)], area=area, steel=STEEL, role="longitudinal"))
+        is_be = x0 in X_BE_LEFT or x0 in X_BE_RIGHT
+        area = A_BE_LINE if is_be else A_WEB_LINE
+        bars.append(Rebar(path=[(x, 0.0), (x, top)], area=area, steel=steel_for(boundary=is_be),
+                          role="longitudinal"))
     xl, xr = lay["x_vertical"][0], lay["x_vertical"][-1]
     xl_in, xr_in = lay["x_vertical"][N_BE_POS - 1], lay["x_vertical"][-N_BE_POS]
     for y in lay["y_hoops"]:                     # hoop legs across each boundary element
-        bars.append(Rebar(path=[(xl, y), (xl_in, y)], area=A_HOOP_LINE, steel=STEEL, role="stirrup"))
-        bars.append(Rebar(path=[(xr_in, y), (xr, y)], area=A_HOOP_LINE, steel=STEEL, role="stirrup"))
+        bars.append(Rebar(path=[(xl, y), (xl_in, y)], area=A_HOOP_LINE,
+                          steel=steel_for(boundary=True), role="stirrup"))
+        bars.append(Rebar(path=[(xr_in, y), (xr, y)], area=A_HOOP_LINE,
+                          steel=steel_for(boundary=True), role="stirrup"))
     for y in lay["y_web"]:                       # horizontal web bars, outer bar to outer bar
-        bars.append(Rebar(path=[(xl, y), (xr, y)], area=A_WEB_LINE, steel=STEEL, role="stirrup"))
+        bars.append(Rebar(path=[(xl, y), (xr, y)], area=A_WEB_LINE,
+                          steel=steel_for(boundary=False), role="stirrup"))
     if top_band > 0.0:                           # dense top load-introduction band (Fig. 9a, D108)
         web = {round(y, 3) for y in lay["y_web"]}   # full-width @191 rows already cover the web here
         n = int(round(top_band / top_band_pitch))
@@ -257,8 +331,8 @@ def rebars(grid: str = GRID, mesh_size: float = MESH, *, length: float = LW, hei
             if key in web:                       # an @191 web bar already spans the web on this line
                 continue
             web.add(key)
-            bars.append(Rebar(path=[(xl_in, y), (xr_in, y)], area=A_WEB_LINE, steel=STEEL,
-                              role="stirrup"))
+            bars.append(Rebar(path=[(xl_in, y), (xr_in, y)], area=A_WEB_LINE,
+                              steel=steel_for(boundary=False), role="stirrup"))
     return tuple(bars)
 
 
