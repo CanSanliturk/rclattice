@@ -77,7 +77,7 @@ def console(pattern):
     return d, s, n
 
 CYC = {"key": "cyclic", "name": "cyclic, the TEST'S OWN protocol · comp = crushing (Concrete02)",
-       "sub": "MEASURED materials (f<sub>y</sub> 434/448, b 0.02, confined boundary f'c 47.6) · isotropic a1 = a3 = 0.02 · top band 1000 · uniform 30.5 · the test's own 8 levels driven at its measured peak displacements (3.05 / 7.4 / 16.0 / 24.35 / 32.95 / 50.2 / 67.2 / 85.0 mm), 1 cycle each",
+       "sub": "MEASURED materials (f<sub>y</sub> 434/448, kinematic b 0.02 bare-bar per source Tables 2/3, confined boundary f'c 47.6) · steel KINEMATIC ONLY — the --steel-iso 0.02 flag was INERT under --materials measured (D112), so no isotropic hardening reached the bars · top band 1000 · uniform 30.5 · the test's own 8 levels driven at its measured peak displacements (3.05 / 7.4 / 16.0 / 24.35 / 32.95 / 50.2 / 67.2 / 85.0 mm), 1 cycle each",
        "elements": "4,961 nodes · 22,310 elements", "color": "var(--cyc)",
        "glob": "2026-09-24_235853_cyclic_crushing*"}
 CYC["dir"], CYC["samples"], CYC["n"] = console(CYC["glob"])

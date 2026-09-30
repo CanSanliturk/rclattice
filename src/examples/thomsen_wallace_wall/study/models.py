@@ -101,8 +101,17 @@ def apply_material_overrides(params: dict) -> dict | None:
     if iso != 0.0:
         # a1 = a3 = iso grows BOTH envelopes equally; a2 = a4 = 1 keeps the reference plastic
         # range at 2*fy/E0. Purely kinematic when iso == 0, which is the default (D109).
-        specimen.STEEL = dataclasses.replace(
-            specimen.STEEL, name=f"{specimen.STEEL.name}-iso{iso:g}", a1=iso, a3=iso)
+        # D112: apply to EVERY grade steel_for() can return, not just the nominal STEEL. Before this,
+        # `--steel-iso` silently no-opped under `--materials measured`, which routes bars to the
+        # separate STEEL_BE/STEEL_WEB grades (they never saw a1/a3). NOTE the SOURCE steel is
+        # Menegotto-Pinto KINEMATIC only (Orakcal & Wallace 2006 Tables 2/3, b = 0.02 bare-bar), so
+        # iso on top of the measured grades is an ADDED modelling assumption, not a measured value.
+        def _with_iso(grade):
+            return dataclasses.replace(grade, name=f"{grade.name}-iso{iso:g}", a1=iso, a3=iso)
+        specimen.STEEL = _with_iso(specimen.STEEL)
+        if specimen.MEASURED:
+            specimen.STEEL_BE = _with_iso(specimen.STEEL_BE)
+            specimen.STEEL_WEB = _with_iso(specimen.STEEL_WEB)
         out["steel_iso"] = [0.0, iso]
     return out or None
 

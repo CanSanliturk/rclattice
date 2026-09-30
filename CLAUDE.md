@@ -12,6 +12,33 @@ Guidance for working in this repository.
 > **Status** section below and DECISIONS.md through D35). The original RC-frame pushover benchmark
 > (D18) is implemented — see D18/D19 and the D34 frame rebuild.
 
+> ## CRITICAL RULE — every analysis starts DETACHED from the Claude session (D111)
+>
+> **Never launch an FE run as a child of a Claude session** — not with the Bash tool's
+> `run_in_background`, not with a trailing `&`, not in the app's Terminal pane. Those processes are
+> children of the Claude desktop app and die when the app restarts, updates, or the session ends. On
+> 2026-09-24 the RW2 crushing cyclic (a 167 h run, 9 h in) was killed this way at step 2.35 M of 34 M;
+> the explicit march has no checkpoints, so nothing of it is recoverable.
+>
+> **The launch form** (from `src/`, output already goes to the run's own directory):
+>
+> ```bash
+> nohup perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' -- uv run python examples/<study>/study/run.py <args> > /dev/null 2>&1 &
+> disown
+> ```
+>
+> macOS ships NO `setsid` binary, so the perl one-liner does it: `POSIX::setsid()` puts the run in
+> its own session and process group so no parent's exit or group kill reaches it, then `exec`s the
+> run; `nohup` ignores the hangup; `disown` drops it from the shell's job table. The run's own
+> `console.log` (teed by `run_dir`) is the record — nothing is captured from the launching shell.
+> Then VERIFY it survived detachment (verified working 2026-09-24):
+> `ps -o pid,pgid,ppid,etime,command -p <pid>` must show `pgid == pid` and `ppid == 1` (launchd).
+> If the check fails, kill it and relaunch; do not leave a fragile run going.
+>
+> Liveness is read from the process table plus the console-log mtime, never from the session that
+> started it. This rule applies to every runner (pushover, cyclic, preflight, elastic sweeps) and to
+> scripts a session writes on the spot.
+
 ## Project
 
 `rclattice` — a Python library to model **reinforced concrete (RC) members and structures**
@@ -866,6 +893,26 @@ the thin-nonlinear-beam lattice instability, D34).
   of 26.9M) came out single-valued — nonlinear elastic, zero dissipation, bars still elastic below
   the ~0.45% yield drift. The RW2 harness now REFUSES cyclic + linear/capped. A crushing cyclic to 2%
   on the uniform 30.5 grid is ~130 h at the measured Concrete02 rate.
+
+- RW2 FIRST FULL CYCLIC RUN COMPLETE (D113): the 2026-09-24 detached run (D111) — `comp=crushing`
+  `tail=solved` `materials=measured` (D110), uniform 30.5, `--top-band 1000` (D108), perfect bond,
+  the test's own 8-level measured protocol to ±2.32% drift — finished 2026-09-30 after **445,200 s
+  (123.7 h ≈ 5.15 days), 34,128,580 explicit steps, converged**, tracing the whole ladder and back to
+  −0.000% (loop closed). **Peak 139.9 kN (5 ms MA) at 0.437% drift = 0.857x** the measured 163.3 kN
+  (Table 4); raw max 142.7 kN is ringing (1.020x); ascending residual 0.9% of peak, so the plateau is
+  real (Aydin's own horizon-1.5 F = 169.8 kN, 1.040x — over-reads where ours under-reads). Stiff-then-
+  weak at MATCHED displacement (D77): m/test 1.031 / 0.913 / 0.856 / 0.824 at 17/34/51/68 mm. TWO
+  caveats govern the read: **(1)** `--steel-iso 0.02` was INERT under `--materials measured` (D112), so
+  the bars carry only the source's bare-bar **kinematic b = 0.02** — exactly the deficit Orakcal &
+  Wallace flag in their own bilinear-steel model; **(2)** `steel_rupture=0` + `concrete_residual=0.2`
+  (defaults) leave NO failure switch engaged (D91/D97), so the flat ~0.82x plateau never turns over and
+  "no level fell to 80%, capacity > 2.32%" is true BY CONSTRUCTION, not a measured capacity (directionally
+  consistent with D99, but off here). FAIR: peak strength, cyclic loop SHAPE + dissipation (crushing is
+  path-dependent — the D109 trap avoided), K/K_continuum, flexural damage location, load-path split. NOT
+  FAIR: drift capacity, measured initial stiffness (Table 4 > uncracked section, D105), bar buckling.
+  Points at THIS specimen's axes: confinement ductility (hold the toe past ε_c0) and coupon strength /
+  hardening (lift the plateau). data.json 2.45 GB stays out of git (`examples/output/` ignored); the
+  run's own `report.md` is the record.
 
 Not yet: the aydin_aldemir_wall replica bond run (staged: `preflight.py --bond --explicit`, then
 `run.py --elastic --bond`, then `run.py --drift 0.0025 --bond --explicit`), and its

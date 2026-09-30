@@ -3587,3 +3587,119 @@ wrong numbers and now carry an explicit correction.
 smoothed series (`StudySpec.peak_window_s`) on monotonic runs — and on cyclic runs, the envelope of
 the smoothed series — then rescore; every RW2 matched-displacement table and the Aldemir ones
 (1 ms window, D92) need re-reading after it.
+
+### D111 — 2026-09-24 — CRITICAL PROCESS RULE: every analysis is launched DETACHED (nohup + setsid + disown) from the Claude session; child-of-app runs die with the app
+
+**What happened.** The RW2 crushing cyclic on the measured protocol
+(`2026-09-24_143059_cyclic_crushing-solved_perfect_guniform_m30.5_iso0.02_tb1000_d2.5pct_protomeasured`,
+estimated 167 h) was launched from a Claude session as a background Bash job at 14:30. At ~23:44 the
+Claude desktop app restarted; the run was its descendant and was killed with it. Last console line:
+step 2,350,000 / 34,128,579 (6.9%, drift -0.137%, 9.0 h). No process held the log afterwards, no
+checkpoint exists, and the explicit march cannot resume — nine hours lost, and the same fate had
+befallen the 23 September ladder cyclic (stopped 14:24, replaced 14:30) for a different reason.
+Earlier the app kept runs alive only by accident of not restarting.
+
+**Rule.** Analyses are started in their own process session, with no ancestry back to the Claude
+app or any of its shells:
+
+```bash
+nohup perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' -- uv run python examples/<study>/study/run.py <args> > /dev/null 2>&1 &
+disown
+```
+
+(macOS has no `setsid` binary; perl's `POSIX::setsid` + `exec` is the equivalent) and the launch is
+verified before it is reported as running: `ps -o pid,pgid,ppid,etime,command -p <pid>` must show
+`pgid == pid` and `ppid == 1`. Verified on a `sleep` stand-in the same day: own pgid, reparented to
+launchd once the launching shell exited. Liveness is
+thereafter judged from the process table and the run directory's `console.log` mtime, never from the
+launching session. The rule covers every runner and every ad-hoc script; the Bash tool's
+`run_in_background`, a bare trailing `&`, and the app's Terminal pane are all forbidden for FE runs.
+Nothing is captured from the launching shell — `run_dir` already tees `console.log`.
+
+**Why setsid and not nohup alone.** `nohup` only ignores SIGHUP. An Electron app tearing down its
+process tree can kill descendants by process group; `setsid()` gives the run its own session and
+group so no parent's exit reaches it, and `disown` stops the shell from forwarding anything at exit.
+
+**Status:** accepted, recorded at the top of CLAUDE.md as the one critical operational rule. The
+killed 2.5% run is NOT relaunched by this entry; relaunch is a separate decision (167 h) for the
+user. A checkpoint/resume facility for the explicit march would make this failure recoverable and is
+NOT built.
+
+### D112 — 2026-09-27 — `--steel-iso` silently no-ops under `--materials measured`: the running RW2 cyclic is KINEMATIC-only `b = 0.02` (the source's own bare-bar value), not "both"; board/status text corrected and the composition fixed
+
+**Source steel (Orakcal & Wallace 2006, the in-repo PDF — the paper where RW2's test results reside).**
+Read directly (its Tables 2/3, pp. 199-201): the reinforcement is a **Menegotto-Pinto** model
+calibrated to **bare-bar** coupon tests — i.e. **kinematic**, with a single post-yield
+strain-hardening ratio `b` plus Bauschinger curvature `R0=20, a1=18.5, a2=0.0015` (borrowed from
+Elmorsi et al.; those `a1/a2` are curvature params, NOT hardening, and NOT OpenSees Steel02's
+isotropic `a1..a4`). Hardening ratio: **bare-bar `b = 0.02`** for both #3 (sigma_y 434) and #2
+(sigma_y 448); the tension-stiffened `b = 0.0185` (#3 boundary) / `0.0350` (#2 web) are deliberately
+NOT used (they'd double-count the lattice's own concrete-tension struts). **No isotropic hardening
+anywhere in the source.** `testdata.py`'s "hardening ratio not printed" note is stale — the source
+prints it; `specimen.py` already records `B_MEAS = 0.02` under D110.
+
+**The bug.** `models.apply_material_overrides` applied the `--steel-iso` tail (`a1 = a3 = iso`) to the
+**nominal** `specimen.STEEL` only. But `--materials measured` sets `specimen.MEASURED = True`, and
+`steel_for()` then returns the **separate** grades `STEEL_BE`/`STEEL_WEB` (defined with `a1 = a3 = 0`),
+which never saw the mutation. So under `--materials measured`, `--steel-iso` was **inert** — the iso
+tail orphaned onto a grade no bar uses.
+
+**Consequence for the 2026-09-24 run.** It was launched `--materials measured --steel-iso 0.02`, so
+its bars are **kinematic-only, `b = 0.02`** (the source's Table 2 value), with **NO isotropic
+hardening** — despite the flag. Earlier status notes and the board subtitle calling it "isotropic
+a1 = a3 = 0.02 / both" were WRONG and are corrected (make_rw2_board.py; the board URL is frozen this
+session, the live docs are corrected). The flat ~0.82x plateau this run traces is thus produced with
+the source's OWN kinematic `b`, which is exactly the deficit Orakcal & Wallace flag in their OWN
+model (p.201: the bilinear steel asymptote "cannot model the curved strain-hardening region" of the
+#3 bars, so their model under-reads capacity at 0.5-1.5% drift; the ~2%-drift degradation is bar
+buckling, which their model — and ours — omit).
+
+**The fix.** The iso block now applies `a1 = a3 = iso` to EVERY grade `steel_for()` can return —
+`specimen.STEEL` and, when `MEASURED`, `STEEL_BE`/`STEEL_WEB` — so `--steel-iso` composes with
+`--materials measured`. Documented in code: the source steel is kinematic-only, so iso on top of the
+measured grades is an ADDED modelling assumption, not a measured value. **The fix does NOT touch the
+running detached analysis** (already built kinematic-only, D111); it changes only future runs.
+
+### D113 — 2026-09-30 — RW2 cyclic (crushing / measured steel / uniform 30.5 / top-band 1000) completed to the full ±2.32% measured protocol: peak 0.857× the test, loop shape fair, and NO degradation over the cycles — a kinematic-`b`=0.02 result (iso inert, D112), with no failure switch engaged so "capacity" is off by construction
+
+The 2026-09-24 detached run (D111) finished **2026-09-30 03:42** after **445,200 s (123.7 h ≈ 5.15
+days)** and **34,128,580 explicit CentralDifference steps** — converged, traced the whole measured
+8-level ladder (0.083 / 0.202 / 0.437 / 0.665 / 0.900 / 1.372 / 1.836 / 2.322% drift) and back to
+−0.000%, so the hysteresis closed. `comp=crushing` (Concrete02, path-DEPENDENT, so unlike the killed
+D109 `comp=linear` run it actually dissipates), `tail=solved`, `materials=measured` (Orakcal &
+Wallace 2006 coupon steel + confined-boundary concrete, D110), `grid=uniform` mesh 30.5,
+`--top-band 1000` (D108), perfect bond. 4,961 nodes / 22,310 elements.
+
+**Peak base shear 139.9 kN (5 ms moving average, D106) at 0.437% drift = 0.857× the measured 163.3 kN
+(Table 4).** The raw sample maximum 142.7 kN is a crack-release RING, 1.020× the smoothed value
+(D92); the ascending-branch residual p95 is 1.3 kN = 0.9% of peak, so the plateau is real resistance,
+not inertia. Aydin's own horizon-1.5 run reads F = 169.8 kN — a 1.040× overshoot, his BEST specimen on
+force — so his model over-reads exactly where ours under-reads.
+
+**Stiff-then-weak against the test, at MATCHED DISPLACEMENT (never peak-to-peak, D77):** model/test
+1.031 → 0.913 → 0.856 → 0.824 at 17 / 34 / 51 / 68 mm. Stiffer than the envelope early (perfect bond,
+D106), then falling behind as the compressed toe passes ε_c0 and sheds moment to bars that cannot
+harden past `b` = 0.02 (verticals 44→32% of the base moment, rebar 28→39%, cf. D106).
+
+**Two honest caveats that govern how this run reads.** (1) `--steel-iso 0.02` was on the command line
+but **INERT** under `--materials measured` (D112) — it orphaned onto the nominal grade while the bars
+route to `STEEL_BE`/`STEEL_WEB`. So the bars carry only the source's OWN bare-bar **kinematic**
+`b` = 0.02, which is precisely the deficit Orakcal & Wallace flag in their own bilinear-steel model
+(their p.201: the asymptote cannot capture the #3 bars' curved strain-hardening, under-reading at
+0.5–1.5% drift). (2) `steel_rupture=0` and `concrete_residual=0.2` are both defaults, so **no failure
+mechanism is engaged** (D91/D97): the load path never turns over — a flat ~0.82× plateau, not a
+descending branch. Therefore "no level fell to 80% of the strongest; the ladder ended at 2.322% still
+above threshold" (the D101 cyclic tip-envelope basis) is true **by construction**, not a measured
+drift capacity. Consistent in direction with D99 (cycling does not degrade where the monotonic push
+does), but for THIS run capacity is simply switched off and must not be quoted as a result.
+
+**Fair from this run:** peak strength (0.857×), cyclic loop SHAPE and dissipation (crushing law is
+path-dependent, the D109 trap avoided), elastic stiffness against the same-grid continuum, the
+flexural damage location, and the plane-sections/truss load-path split. **Not fair:** drift capacity
+(no failure switch, and the coupon strengths / hardening / rupture strain the primary source does not
+print), the measured initial stiffness (Table 4's 35.19 kN/mm exceeds the uncracked section — judge
+on K/K_continuum, D105), and bar buckling (Steel02 has none; the likely end of the physical test).
+The result points, unchanged from Stage 1 (D106/D107), at this specimen's real axes: **confinement
+ductility** (to hold the toe past ε_c0) and **coupon strength / hardening** (to lift the plateau).
+The 2.45 GB `data.json` stays out of git (`examples/output/` is ignored); the run's own `report.md`
+is the record.
